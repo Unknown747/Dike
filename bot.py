@@ -318,17 +318,27 @@ def print_startup_banner(cfg, user, balance):
 #  TAMPILAN TIAP BET
 # ═══════════════════════════════════════════════
 
-def print_result(n, won, roll, net, balance, total_profit, tw, tl):
-    num   = dim(f"#{n:<5}")
-    icon  = green("WIN ") if won else red("LOSS")
-    roll_ = white(f"{roll:.2f}")
-    net_s = green(f"+Rp {net:>9,.0f}") if won else red(f"-Rp {abs(net):>9,.0f}")
-    bal_s = cyan(f"Rp {balance:>13,.0f}")
-    sign  = "+" if total_profit >= 0 else ""
-    pcol  = green if total_profit >= 0 else red
-    pl_s  = pcol(f"P/L {sign}Rp {total_profit:,.0f}")
-    score = dim(f"[M:{tw} K:{tl}]")
-    raw_print(f"  {num} {icon}  {roll_}  {net_s}  {bal_s}  {pl_s}  {score}")
+def print_result(n, won, roll, bet, net, balance, start_bal, total_wager, tw, tl):
+    # #Spin
+    num    = dim(f"#{n:<4}")
+    # WIN / LOSS
+    icon   = green("WIN ") if won else red("LOSS")
+    # Angka dadu
+    roll_  = white(f"{roll:>5.2f}")
+    # Bet saat ini
+    bet_s  = white(f"Bet:{bet:>7,}")
+    # Total wager sesi ini
+    wag_s  = dim(f"Wager:{total_wager:>10,.0f}")
+    # Saldo
+    bal_s  = cyan(f"Saldo:{balance:>12,.0f}")
+    # Saldo naik/turun vs awal sesi
+    diff   = balance - start_bal
+    dsign  = "+" if diff >= 0 else ""
+    dcol   = green if diff >= 0 else red
+    diff_s = dcol(f"({dsign}{diff:,.0f})")
+    # W / K
+    score  = dim(f"W:{tw} K:{tl}")
+    raw_print(f"  {num} {icon}  {roll_}  {bet_s}  {wag_s}  {bal_s} {diff_s}  {score}")
 
 def print_loss_stop(bet, loss_amount, pause_sec):
     raw_print()
@@ -395,8 +405,9 @@ def run_bot():
             "total_wager"  : 0.0,
         }
 
-    state = new_session_state()
-    stats = make_stats()
+    state               = new_session_state()
+    stats               = make_stats()
+    session_start_bal   = balance   # saldo awal sesi pertama
 
     # Statistik kumulatif lintas sesi
     cum = {
@@ -468,8 +479,9 @@ def run_bot():
                 stats["profit"]       += net
                 stats["biggest_win"]   = max(stats["biggest_win"], net)
 
-                print_result(state["total_bets"], True, dice_result, net,
-                             balance, state["total_profit"],
+                print_result(state["total_bets"], True, dice_result,
+                             current_bet, net, balance, session_start_bal,
+                             state["total_wager"],
                              state["total_wins"], state["total_losses"])
 
                 # Naikkan bet
@@ -486,8 +498,9 @@ def run_bot():
                 cum["total_wager"]    += state["total_wager"]
                 cum["total_profit"]   += state["total_profit"]
 
-                print_result(state["total_bets"], False, dice_result, net,
-                             balance, state["total_profit"],
+                print_result(state["total_bets"], False, dice_result,
+                             current_bet, net, balance, session_start_bal,
+                             state["total_wager"],
                              state["total_wins"], state["total_losses"])
 
                 print_loss_stop(current_bet, amount, cfg["stop_pause_sec"])
@@ -497,8 +510,9 @@ def run_bot():
 
                 # Mulai sesi baru
                 cum["sessions"] += 1
-                state = new_session_state()
-                stats = make_stats()
+                state             = new_session_state()
+                stats             = make_stats()
+                session_start_bal = balance
                 log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
                 continue
 
@@ -513,8 +527,9 @@ def run_bot():
                 time.sleep(cfg["stop_pause_sec"])
 
                 cum["sessions"] += 1
-                state = new_session_state()
-                stats = make_stats()
+                state             = new_session_state()
+                stats             = make_stats()
+                session_start_bal = balance
                 log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
                 continue
 
