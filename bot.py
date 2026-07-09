@@ -33,7 +33,7 @@ def dim(t):     return _c("2",  t)
 #  LOG KE FILE + TERMINAL
 # ═══════════════════════════════════════════════
 
-LOG_FILE = "dike.log"
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dike.log")
 
 LEVEL_COLOR = {
     "INFO":     white,
