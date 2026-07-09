@@ -1,22 +1,56 @@
-// --- LOGIKA UTAMA (BASE & SPEED) ---
-Set Base Bet = 100 IDR
-Set Custom Delay = 300 ms
+# ============================================================
+#   DIKE BOT - KONFIGURASI STAKE.COM DICE AUTO BET
+# ============================================================
 
-// --- MANAJEMEN KEKALAHAN (LOSE STREAK) ---
-On Every Streaks Of 3 Losses > Increase Bet Amount 250.00%  (Sudah diturunkan dari 1500%)
-On Every Streaks Of 3 Losses > Set Win Change 92.00%
-On Every Streaks Of 4 Losses > Set Win Change 89.00%
-On Every Streaks Of 5 Losses > Set Win Change 94.01%
-On Every Streaks Of 6 Losses > Increase Bet Amount 300.00%  (Sudah diturunkan dari 1600%)
-On Every Streaks Of 6 Losses > Set Win Change 93.00%
+# --- API / AUTENTIKASI ---
+API_TOKEN = MASUKKAN_TOKEN_API_ANDA_DISINI
 
-// --- MANAJEMEN KEMENANGAN (WIN STREAK) ---
-On Every 3 Wins > Reset Bet Amount  
-On Every Streaks Of 2 Wins > Decrease Bet Amount 70.00%
-On Every Streaks Of 4 Wins > Set Win Change 70.00%
-On Every Streaks Of 6 Wins > Set Change 65.00%
+# --- MATA UANG (pilih salah satu: btc, eth, ltc, doge, xrp, trx, eos, bch) ---
+CURRENCY = ltc
 
-// --- RESET & SAFETY STOP ---
-On Every Win > Reset Win Change  
-On Every 9 Bets > Reset Win Change  
-On Greater Than Or Equal To 5000 IDR Loss > Stop Bot Start Again 2 Minutes
+# --- LOGIKA UTAMA (BASE & SPEED) ---
+BASE_BET = 0.00000100
+CUSTOM_DELAY_MS = 300
+
+# --- MANAJEMEN KEKALAHAN (LOSE STREAK) ---
+# Setiap 3 kalah berturut-turut
+LOSS_STREAK_3_INCREASE_BET_PERCENT = 250.00
+LOSS_STREAK_3_WIN_CHANCE = 92.00
+
+# Setiap 4 kalah berturut-turut
+LOSS_STREAK_4_WIN_CHANCE = 89.00
+
+# Setiap 5 kalah berturut-turut
+LOSS_STREAK_5_WIN_CHANCE = 94.01
+
+# Setiap 6 kalah berturut-turut
+LOSS_STREAK_6_INCREASE_BET_PERCENT = 300.00
+LOSS_STREAK_6_WIN_CHANCE = 93.00
+
+# --- MANAJEMEN KEMENANGAN (WIN STREAK) ---
+# Setiap 3 menang total (reset)
+WIN_EVERY_3_RESET_BET = true
+
+# Setiap 2 menang berturut-turut
+WIN_STREAK_2_DECREASE_BET_PERCENT = 70.00
+
+# Setiap 4 menang berturut-turut
+WIN_STREAK_4_WIN_CHANCE = 70.00
+
+# Setiap 6 menang berturut-turut
+WIN_STREAK_6_WIN_CHANCE = 65.00
+
+# --- RESET & SAFETY STOP ---
+# Reset win chance setiap menang
+WIN_RESET_WIN_CHANCE = true
+
+# Reset win chance setiap 9 bet
+EVERY_9_BETS_RESET_WIN_CHANCE = true
+
+# Stop bot jika total loss >= nilai ini (dalam unit mata uang)
+# Sesuaikan dengan currency yang dipakai
+STOP_LOSS_AMOUNT = 0.00005000
+STOP_LOSS_PAUSE_MINUTES = 2
+
+# --- DEFAULT WIN CHANCE ---
+DEFAULT_WIN_CHANCE = 49.50
