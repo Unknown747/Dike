@@ -17,34 +17,27 @@ Set Base Bet         = 100
 DEFAULT_WIN_CHANCE   = 98.00
 CUSTOM_DELAY_MS      = 300
 
-# Batas bet maksimum (0 = tidak ada batas)
-MAX_BET_IDR          = 0
-
-# Bot berhenti jika saldo di bawah angka ini (0 = bebas)
+# Bet tidak akan melebihi angka ini.
+# Bot akan berhenti jika saldo < base bet (0 = bebas)
+MAX_BET_IDR          = 5000
 MIN_BALANCE_IDR      = 0
 
 # ============================================================
-#   STRATEGI: NAIK % SETIAP MENANG / KALAH
+#   STRATEGI
+#   - Setiap MENANG : bet naik X%
+#   - Setiap KALAH  : bot BERHENTI (berhenti saat kalah)
 # ============================================================
 
-# Naikkan bet sebesar X% setiap MENANG
 ON_WIN_INCREASE_PCT  = 15
 
-# Naikkan bet sebesar X% setiap KALAH (100 = dobel)
-ON_LOSS_INCREASE_PCT = 100
-
 # ============================================================
-#   BERHENTI SAAT KALAH
+#   JEDA SEBELUM BERHENTI (detik)
 # ============================================================
 
-# Bot berhenti jika total kerugian sesi mencapai angka ini
-STOP_LOSS_IDR        = 5000
-
-# Jeda sebelum bot berhenti (detik)
-STOP_LOSS_PAUSE_SECONDS = 10
+STOP_PAUSE_SECONDS   = 10
 
 # ============================================================
-#   TARGET WAGER (0 = tidak ada target, bot jalan terus)
+#   TARGET WAGER (0 = bot jalan terus tanpa target)
 # ============================================================
 
 TARGET_WAGER_IDR     = 0

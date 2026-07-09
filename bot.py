@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 DIKE - Stake.com Dice Auto Bet Bot (IDR)
-Strategi: Simple On-Win / On-Loss
+Strategi:
+  - Setiap MENANG : bet naik ON_WIN_INCREASE_PCT %
+  - Setiap KALAH  : bot berhenti otomatis
 """
 
 import time, sys, uuid, os, requests
 from datetime import datetime, date
 
-# Session HTTP persisten
 _http = requests.Session()
 
 # ═══════════════════════════════════════════════
@@ -45,7 +46,6 @@ LEVEL_COLOR = {
     "ERROR": red,
     "RULE":  dim,
     "STOP":  yellow,
-    "SALDO": cyan,
     "STAT":  blue,
 }
 
@@ -86,9 +86,6 @@ def box_top(title=""):
 
 def box_mid():
     raw_print(bold(cyan(f"╠{'═'*W}╣")))
-
-def box_sep():
-    raw_print(dim(cyan(f"║{'─'*W}║")))
 
 def box_row(label, value, color_fn=white, width=W):
     inner   = f"  {label:<22}{value}"
@@ -136,19 +133,17 @@ def load_config():
         log("API_TOKEN belum diset di setting.txt atau env var STAKE_API_TOKEN!", "ERROR")
         sys.exit(1)
     return {
-        "api_token"         : api_token,
-        "currency"          : cfg.get("CURRENCY", "idr").lower(),
-        "base_bet"          : float(cfg.get("BASE_BET", "100")),
-        "delay_ms"          : float(cfg.get("CUSTOM_DELAY_MS", "300")),
-        "win_chance"        : float(cfg.get("DEFAULT_WIN_CHANCE", "98.00")),
-        "max_bet"           : float(cfg.get("MAX_BET_IDR", "0")),
-        "min_balance"       : float(cfg.get("MIN_BALANCE_IDR", "0")),
-        "on_win_pct"        : float(cfg.get("ON_WIN_INCREASE_PCT", "15")),
-        "on_loss_pct"       : float(cfg.get("ON_LOSS_INCREASE_PCT", "100")),
-        "stop_loss"         : float(cfg.get("STOP_LOSS_IDR", "5000")),
-        "stop_loss_pause_sec": float(cfg.get("STOP_LOSS_PAUSE_SECONDS", "10")),
-        "target_wager"      : float(cfg.get("TARGET_WAGER_IDR", "0")),
-        "disable_colors"    : cfg.get("DISABLE_COLORS", "false").lower() == "true",
+        "api_token"        : api_token,
+        "currency"         : cfg.get("CURRENCY", "idr").lower(),
+        "base_bet"         : float(cfg.get("BASE_BET", "100")),
+        "delay_ms"         : float(cfg.get("CUSTOM_DELAY_MS", "300")),
+        "win_chance"       : float(cfg.get("DEFAULT_WIN_CHANCE", "98.00")),
+        "max_bet"          : float(cfg.get("MAX_BET_IDR", "5000")),
+        "min_balance"      : float(cfg.get("MIN_BALANCE_IDR", "0")),
+        "on_win_pct"       : float(cfg.get("ON_WIN_INCREASE_PCT", "15")),
+        "stop_pause_sec"   : float(cfg.get("STOP_PAUSE_SECONDS", "10")),
+        "target_wager"     : float(cfg.get("TARGET_WAGER_IDR", "0")),
+        "disable_colors"   : cfg.get("DISABLE_COLORS", "false").lower() == "true",
     }
 
 def check_hot_reload(cfg):
@@ -192,22 +187,22 @@ USER_QUERY = """{ user { id name balances { available { amount currency } } } }"
 
 def make_headers(api_token):
     return {
-        "Content-Type"              : "application/json",
-        "Accept"                    : "*/*",
-        "Accept-Language"           : "en-US,en;q=0.9",
-        "Accept-Encoding"           : "gzip, deflate",
-        "Origin"                    : "https://stake.com",
-        "Referer"                   : "https://stake.com/",
-        "User-Agent"                : (
+        "Content-Type"                : "application/json",
+        "Accept"                      : "*/*",
+        "Accept-Language"             : "en-US,en;q=0.9",
+        "Accept-Encoding"             : "gzip, deflate",
+        "Origin"                      : "https://stake.com",
+        "Referer"                     : "https://stake.com/",
+        "User-Agent"                  : (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
         ),
-        "x-access-token"            : api_token,
-        "x-language"                : "en",
-        "apollographql-client-name" : "web",
+        "x-access-token"              : api_token,
+        "x-language"                  : "en",
+        "apollographql-client-name"   : "web",
         "apollographql-client-version": "1.0.0",
-        "Connection"                : "keep-alive",
+        "Connection"                  : "keep-alive",
     }
 
 def get_user_info(api_token):
@@ -231,7 +226,7 @@ def get_balance(api_token, currency):
     return 0.0
 
 class RateLimitError(Exception):
-    """Stake.com 'Please slow down' / parallelCasinoBet."""
+    pass
 
 def roll_dice(api_token, amount, win_chance, currency):
     target  = round(100.0 - win_chance, 4)
@@ -263,23 +258,23 @@ def roll_dice(api_token, amount, win_chance, currency):
     return data["data"]["diceRoll"]
 
 # ═══════════════════════════════════════════════
-#  STATISTIK HARIAN
+#  STATISTIK SESI
 # ═══════════════════════════════════════════════
 
-def make_daily_stats():
+def make_stats():
     return {
-        "date"       : str(date.today()),
-        "bets"       : 0,
-        "wins"       : 0,
-        "losses"     : 0,
-        "profit"     : 0.0,
-        "biggest_win": 0.0,
-        "biggest_loss": 0.0,
+        "date"        : str(date.today()),
+        "bets"        : 0,
+        "wins"        : 0,
+        "losses"      : 0,
+        "profit"      : 0.0,
+        "biggest_win" : 0.0,
+        "loss_amount" : 0.0,
     }
 
-def print_daily_stats(stats):
+def print_stats(stats, label="STATISTIK SESI"):
     raw_print()
-    box_top("STATISTIK HARIAN")
+    box_top(label)
     box_row("Tanggal",      stats["date"],                      cyan)
     box_row("Total Bet",    f"{stats['bets']:,}",               white)
     box_row("Menang",       f"{stats['wins']:,}",               green)
@@ -290,7 +285,8 @@ def print_daily_stats(stats):
     pcol = green if stats["profit"] >= 0 else red
     box_row("Total P/L",    f"Rp {sign}{stats['profit']:,.0f}", pcol)
     box_row("Win Terbesar", f"Rp +{stats['biggest_win']:,.0f}", green)
-    box_row("Kalah Terbesar",f"Rp -{stats['biggest_loss']:,.0f}", red)
+    if stats["losses"] > 0:
+        box_row("Kalah (berhenti)", f"Rp -{stats['loss_amount']:,.0f}", red)
     box_bottom()
     raw_print()
 
@@ -304,19 +300,14 @@ def print_startup_banner(cfg, user, balance):
     box_line(f"User   : {user['name']}  (ID: {user['id']})", cyan)
     box_line(f"Saldo  : Rp {balance:,.2f}  [{cfg['currency'].upper()}]", green)
     box_mid()
-    box_row("Base Bet",      f"Rp {cfg['base_bet']:,.0f}",        white)
-    box_row("Win Chance",    f"{cfg['win_chance']}%",             cyan)
-    box_row("Saat Menang",   f"Bet naik {cfg['on_win_pct']:.0f}%", green)
-    box_row("Saat Kalah",    f"Bet naik {cfg['on_loss_pct']:.0f}% (dobel)", red)
-    box_row("Stop Loss",     f"Rp {cfg['stop_loss']:,.0f}  "
-                             f"(jeda {cfg['stop_loss_pause_sec']:.0f} detik)", yellow)
-    if cfg["max_bet"] > 0:
-        box_row("Max Bet",   f"Rp {cfg['max_bet']:,.0f}", yellow)
-    if cfg["min_balance"] > 0:
-        box_row("Min Saldo", f"Rp {cfg['min_balance']:,.0f}", yellow)
+    box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",           white)
+    box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",            yellow)
+    box_row("Win Chance",  f"{cfg['win_chance']}%",                cyan)
+    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",   green)
+    box_row("Saat Kalah",  "Bot berhenti otomatis",                red)
+    box_row("Delay",       f"{cfg['delay_ms']:.0f} ms",            white)
     if cfg["target_wager"] > 0:
         box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}", blue)
-    box_row("Delay",         f"{cfg['delay_ms']:.0f} ms",         white)
     box_bottom()
     raw_print()
 
@@ -336,15 +327,17 @@ def print_result(n, won, roll, net, balance, total_profit, tw, tl):
     score = dim(f"[M:{tw} K:{tl}]")
     raw_print(f"  {num} {icon}  {roll_}  {net_s}  {bal_s}  {pl_s}  {score}")
 
-def print_stop(session_loss, pause_sec):
+def print_loss_stop(bet, loss_amount, pause_sec):
     raw_print()
-    raw_print(yellow(f"  ┌{'─'*46}┐"))
-    raw_print(yellow(f"  │  ⛔  BERHENTI SAAT KALAH") + " " * 21 + yellow("│"))
-    raw_print(yellow(f"  │  Kerugian sesi : Rp {session_loss:>10,.0f}") +
-              " " * max(0, 14 - len(f"{session_loss:,.0f}")) + yellow("│"))
-    raw_print(yellow(f"  │  Berhenti dalam {pause_sec:.0f} detik...") +
-              " " * max(0, 27 - len(f"{pause_sec:.0f} detik...")) + yellow("│"))
-    raw_print(yellow(f"  └{'─'*46}┘"))
+    raw_print(red(f"  ┌{'─'*46}┐"))
+    raw_print(red(f"  │  ⛔  KALAH — Bot berhenti") + " " * 20 + red("│"))
+    raw_print(red(f"  │  Bet saat kalah : Rp {bet:>10,.0f}") +
+              " " * max(0, 12 - len(f"{bet:,.0f}")) + red("│"))
+    raw_print(red(f"  │  Kerugian       : Rp {loss_amount:>10,.0f}") +
+              " " * max(0, 12 - len(f"{loss_amount:,.0f}")) + red("│"))
+    raw_print(red(f"  │  Berhenti dalam {pause_sec:.0f} detik...") +
+              " " * max(0, 27 - len(f"{pause_sec:.0f} detik...")) + red("│"))
+    raw_print(red(f"  └{'─'*46}┘"))
     raw_print()
 
 def print_target_reached(total_wager, target):
@@ -355,7 +348,6 @@ def print_target_reached(total_wager, target):
               " " * max(0, 17 - len(f"{total_wager:,.0f}")) + green("│"))
     raw_print(green(f"  │  Target : Rp {target:>14,.0f}") +
               " " * max(0, 17 - len(f"{target:,.0f}")) + green("│"))
-    raw_print(green(f"  │  Bot dihentikan otomatis.") + " " * 20 + green("│"))
     raw_print(green(f"  └{'─'*46}┘"))
     raw_print()
 
@@ -373,7 +365,6 @@ def run_bot():
     if cfg["disable_colors"]:
         _COLOR = False
 
-    # Verifikasi akun & saldo awal
     try:
         user    = get_user_info(cfg["api_token"])
         balance = get_balance(cfg["api_token"], cfg["currency"])
@@ -388,13 +379,11 @@ def run_bot():
         "total_bets"   : 0,
         "total_wins"   : 0,
         "total_losses" : 0,
-        "session_loss" : 0.0,
         "total_profit" : 0.0,
         "total_wager"  : 0.0,
     }
 
-    daily         = make_daily_stats()
-    today         = date.today()
+    stats         = make_stats()
     balance_check = 0
 
     while True:
@@ -404,13 +393,6 @@ def run_bot():
             if cfg["disable_colors"]:
                 _COLOR = False
 
-            # ── GANTI HARI ───────────────────────────────
-            if date.today() != today:
-                print_daily_stats(daily)
-                daily = make_daily_stats()
-                today = date.today()
-                log(f"Hari baru: {today}")
-
             # ── CEK SALDO SETIAP 50 BET ──────────────────
             balance_check += 1
             if balance_check >= 50:
@@ -419,19 +401,19 @@ def run_bot():
                     balance = get_balance(cfg["api_token"], cfg["currency"])
                     if cfg["min_balance"] > 0 and balance < cfg["min_balance"]:
                         log(f"Saldo Rp {balance:,.0f} < batas Rp {cfg['min_balance']:,.0f}. Bot berhenti!", "WARN")
-                        print_daily_stats(daily)
+                        print_stats(stats)
                         sys.exit(0)
                 except Exception as e:
                     log(f"Gagal cek saldo: {e}", "WARN")
 
-            # ── PREFLIGHT: pastikan bet tidak melebihi saldo ──
+            # ── PASTIKAN BET TIDAK MELEBIHI SALDO ────────
             if state["bet"] > balance and balance > 0:
                 log(f"Bet Rp {round(state['bet']):,} > saldo Rp {balance:,.0f} → reset ke base", "WARN")
                 state["bet"] = cfg["base_bet"]
 
-            # Terapkan max bet dan bulatkan
-            if cfg["max_bet"] > 0 and state["bet"] > cfg["max_bet"]:
-                state["bet"] = cfg["max_bet"]
+            # ── TERAPKAN MAX BET ──────────────────────────
+            if cfg["max_bet"] > 0:
+                state["bet"] = min(state["bet"], cfg["max_bet"])
             state["bet"] = max(round(state["bet"]), 1)
 
             # ── BET ──────────────────────────────────────
@@ -444,52 +426,47 @@ def run_bot():
             won         = payout > 0
             net         = payout - amount
 
-            balance               += net
-            state["total_bets"]   += 1
-            state["total_wager"]  += amount
-            daily["bets"]         += 1
+            balance              += net
+            state["total_bets"]  += 1
+            state["total_wager"] += amount
+            stats["bets"]        += 1
 
             if won:
                 state["total_profit"] += net
                 state["total_wins"]   += 1
-                daily["wins"]         += 1
-                daily["profit"]       += net
-                daily["biggest_win"]   = max(daily["biggest_win"], net)
-
-                # Naikkan bet saat menang
-                state["bet"] = current_bet * (1 + cfg["on_win_pct"] / 100)
+                stats["wins"]         += 1
+                stats["profit"]       += net
+                stats["biggest_win"]   = max(stats["biggest_win"], net)
 
                 print_result(state["total_bets"], True, dice_result, net,
                              balance, state["total_profit"],
                              state["total_wins"], state["total_losses"])
 
+                # Naikkan bet
+                state["bet"] = current_bet * (1 + cfg["on_win_pct"] / 100)
+
             else:
+                # ── KALAH → BERHENTI ─────────────────────
                 state["total_profit"] -= amount
                 state["total_losses"] += 1
-                state["session_loss"] += amount
-                daily["losses"]       += 1
-                daily["profit"]       -= amount
-                daily["biggest_loss"]  = max(daily["biggest_loss"], amount)
-
-                # Dobel bet saat kalah
-                state["bet"] = current_bet * (1 + cfg["on_loss_pct"] / 100)
+                stats["losses"]       += 1
+                stats["profit"]       -= amount
+                stats["loss_amount"]   = amount
 
                 print_result(state["total_bets"], False, dice_result, net,
                              balance, state["total_profit"],
                              state["total_wins"], state["total_losses"])
 
-            # ── BERHENTI SAAT KALAH ──────────────────────
-            if state["session_loss"] >= cfg["stop_loss"]:
-                print_stop(state["session_loss"], cfg["stop_loss_pause_sec"])
-                print_daily_stats(daily)
-                time.sleep(cfg["stop_loss_pause_sec"])
-                log("Bot berhenti. Jalankan ulang jika ingin mulai sesi baru.", "STOP")
+                print_loss_stop(current_bet, amount, cfg["stop_pause_sec"])
+                print_stats(stats)
+                time.sleep(cfg["stop_pause_sec"])
+                log("Bot berhenti. Jalankan ulang untuk sesi baru.", "STOP")
                 sys.exit(0)
 
             # ── TARGET WAGER TERCAPAI ────────────────────
             if cfg["target_wager"] > 0 and state["total_wager"] >= cfg["target_wager"]:
                 print_target_reached(state["total_wager"], cfg["target_wager"])
-                print_daily_stats(daily)
+                print_stats(stats, "STATISTIK SESI — TARGET TERCAPAI")
                 sys.exit(0)
 
             time.sleep(cfg["delay_ms"] / 1000.0)
@@ -497,7 +474,7 @@ def run_bot():
         except KeyboardInterrupt:
             raw_print()
             log("Bot dihentikan oleh user.", "STOP")
-            print_daily_stats(daily)
+            print_stats(stats)
             sys.exit(0)
 
         except RateLimitError:
@@ -523,7 +500,6 @@ def run_bot():
 
         except Exception as e:
             err_msg = str(e).lower()
-            # Saldo tidak cukup → reset bet ke base sebelum retry
             if any(k in err_msg for k in ("insufficient", "amount", "balance", "funds")):
                 log(f"Saldo tidak cukup — reset bet ke Rp {cfg['base_bet']:,.0f}", "WARN")
                 state["bet"] = cfg["base_bet"]
