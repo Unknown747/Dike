@@ -53,6 +53,17 @@ DAILY_LOSS_LIMIT_IDR = 50000
 STOP_PAUSE_SECONDS   = 10
 
 # ============================================================
+#   PERLINDUNGAN SESI & STREAK KALAH
+# ============================================================
+
+# Jeda ekstra saat bet yang kalah >= angka ini (0 = nonaktif)
+STOP_LOSS_SESSION_IDR    = 1000
+
+# Bot jeda lebih lama setelah kalah N sesi berturut-turut (0 = nonaktif)
+LOSS_STREAK_THRESHOLD    = 5
+LOSS_STREAK_EXTRA_PAUSE  = 120
+
+# ============================================================
 #   TARGET WAGER (0 = bot jalan terus tanpa target)
 # ============================================================
 

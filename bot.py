@@ -9,7 +9,8 @@ Strategi:
 import time, sys, uuid, os, requests, random
 from datetime import datetime, date
 
-_http = requests.Session()
+_http   = requests.Session()
+DRY_RUN = "--dry-run" in sys.argv
 
 # ═══════════════════════════════════════════════
 #  WARNA TERMINAL (ANSI)
@@ -36,7 +37,20 @@ def dim(t):    return _c("2",  t)
 #  LOG KE FILE + TERMINAL
 # ═══════════════════════════════════════════════
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dike.log")
+LOG_FILE      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dike.log")
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+
+def _rotate_log():
+    """Pindahkan dike.log → dike.log.bak jika ukurannya >= 5 MB."""
+    try:
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) >= LOG_MAX_BYTES:
+            bak = LOG_FILE + ".bak"
+            os.replace(LOG_FILE, bak)
+            with open(LOG_FILE, "a") as f:
+                f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [INFO] "
+                        f"Log dirotasi — file lama disimpan ke dike.log.bak\n")
+    except Exception:
+        pass
 
 LEVEL_COLOR = {
     "INFO":  white,
@@ -129,9 +143,11 @@ def load_config():
     api_token = cfg.get("API_TOKEN", "")
     if not api_token or api_token == "MASUKKAN_TOKEN_API_ANDA_DISINI":
         api_token = os.environ.get("STAKE_API_TOKEN", "")
-    if not api_token:
+    if not api_token and not DRY_RUN:
         log("API_TOKEN belum diset di setting.txt atau env var STAKE_API_TOKEN!", "ERROR")
         sys.exit(1)
+    if not api_token:
+        api_token = "dry-run"
     d_min = max(0.0, float(cfg.get("DELAY_MIN_MS", "200")))
     d_max = max(0.0, float(cfg.get("DELAY_MAX_MS", "500")))
     if d_min > d_max:
@@ -149,8 +165,11 @@ def load_config():
         "stop_pause_sec"   : float(cfg.get("STOP_PAUSE_SECONDS", "10")),
         "stop_profit"      : float(cfg.get("STOP_PROFIT_IDR", "0")),
         "target_wager"     : float(cfg.get("TARGET_WAGER_IDR", "0")),
-        "daily_loss_limit" : float(cfg.get("DAILY_LOSS_LIMIT_IDR", "0")),
-        "disable_colors"   : cfg.get("DISABLE_COLORS", "false").lower() == "true",
+        "daily_loss_limit"       : float(cfg.get("DAILY_LOSS_LIMIT_IDR", "0")),
+        "stop_loss_session"      : float(cfg.get("STOP_LOSS_SESSION_IDR", "0")),
+        "loss_streak_threshold"  : int(float(cfg.get("LOSS_STREAK_THRESHOLD", "5"))),
+        "loss_streak_extra_pause": float(cfg.get("LOSS_STREAK_EXTRA_PAUSE", "120")),
+        "disable_colors"         : cfg.get("DISABLE_COLORS", "false").lower() == "true",
     }
 
 def check_hot_reload(cfg):
@@ -303,22 +322,30 @@ def print_stats(stats, label="STATISTIK SESI"):
 
 def print_startup_banner(cfg, user, balance):
     raw_print()
-    box_top("DIKE  ·  Stake.com Dice Auto Bet")
+    title = "DIKE  ·  DRY-RUN MODE" if DRY_RUN else "DIKE  ·  Stake.com Dice Auto Bet"
+    box_top(title)
+    if DRY_RUN:
+        box_line("⚠  DRY-RUN — tidak ada bet nyata ke Stake.com", yellow)
+        box_mid()
     box_line(f"User   : {user['name']}  (ID: {user['id']})", cyan)
     box_line(f"Saldo  : Rp {balance:,.2f}  [{cfg['currency'].upper()}]", green)
     box_mid()
-    box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",                   white)
-    box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",                    yellow)
-    box_row("Win Chance",  f"{cfg['win_chance']}%",                        cyan)
-    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",           green)
-    box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)", red)
+    box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",                        white)
+    box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",                         yellow)
+    box_row("Win Chance",  f"{cfg['win_chance']}%",                             cyan)
+    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",                green)
+    box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)",      red)
     if cfg["stop_profit"] > 0:
-        box_row("Stop Profit", f"Rp {cfg['stop_profit']:,.0f}",            green)
+        box_row("Stop Profit",    f"Rp {cfg['stop_profit']:,.0f}",              green)
     if cfg["daily_loss_limit"] > 0:
-        box_row("Daily Loss Limit", f"Rp {cfg['daily_loss_limit']:,.0f}",  red)
+        box_row("Daily Loss Limit", f"Rp {cfg['daily_loss_limit']:,.0f}",       red)
+    if cfg["stop_loss_session"] > 0:
+        box_row("Stop Loss Sesi", f"Rp {cfg['stop_loss_session']:,.0f} → jeda ekstra", yellow)
+    if cfg["loss_streak_threshold"] > 0:
+        box_row("Streak Protect", f"{cfg['loss_streak_threshold']}× kalah → +{cfg['loss_streak_extra_pause']:.0f}s", yellow)
     box_row("Cooldown",    f"{cfg['delay_min_ms']:.0f}–{cfg['delay_max_ms']:.0f} ms (acak)", white)
     if cfg["target_wager"] > 0:
-        box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}",          blue)
+        box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}",              blue)
     box_bottom()
     raw_print()
 
@@ -326,27 +353,26 @@ def print_startup_banner(cfg, user, balance):
 #  TAMPILAN TIAP BET
 # ═══════════════════════════════════════════════
 
-def print_result(n, won, roll, bet, net, balance, start_bal, total_wager, tw, tl):
-    # #Spin
+def print_result(n, won, roll, bet, net, balance, start_bal, total_wager, tw, tl,
+                 daily_loss=0.0, daily_limit=0.0):
     num    = dim(f"#{n:<4}")
-    # WIN / LOSS
     icon   = green("WIN ") if won else red("LOSS")
-    # Angka dadu
     roll_  = white(f"{roll:>5.2f}")
-    # Bet saat ini
     bet_s  = white(f"Bet:{bet:>7,}")
-    # Total wager sesi ini
     wag_s  = dim(f"Wager:{total_wager:>10,.0f}")
-    # Saldo
     bal_s  = cyan(f"Saldo:{balance:>12,.0f}")
-    # Saldo naik/turun vs awal sesi
     diff   = balance - start_bal
     dsign  = "+" if diff >= 0 else ""
     dcol   = green if diff >= 0 else red
     diff_s = dcol(f"({dsign}{diff:,.0f})")
-    # W / K
     score  = dim(f"W:{tw} K:{tl}")
-    raw_print(f"  {num} {icon}  {roll_}  {bet_s}  {wag_s}  {bal_s} {diff_s}  {score}")
+    if daily_limit > 0:
+        dl_pct = min(daily_loss / daily_limit * 100, 100)
+        dl_col = red if dl_pct >= 80 else (yellow if dl_pct >= 50 else dim)
+        dl_s   = dl_col(f"DL:{daily_loss:,.0f}/{daily_limit:,.0f}")
+        raw_print(f"  {num} {icon}  {roll_}  {bet_s}  {wag_s}  {bal_s} {diff_s}  {score}  {dl_s}")
+    else:
+        raw_print(f"  {num} {icon}  {roll_}  {bet_s}  {wag_s}  {bal_s} {diff_s}  {score}")
 
 def print_loss_stop(bet, loss_amount, pause_sec):
     raw_print()
@@ -379,6 +405,35 @@ def print_target_reached(total_wager, target):
               " " * max(0, 17 - len(f"{target:,.0f}")) + green("│"))
     raw_print(green(f"  └{'─'*46}┘"))
     raw_print()
+
+# ═══════════════════════════════════════════════
+#  DRY-RUN MODE — mock API tanpa bet nyata
+# ═══════════════════════════════════════════════
+
+if DRY_RUN:
+    _dr_balance = {}
+
+    def get_user_info(api_token):          # noqa: F811
+        return {"id": "dry-run", "name": "DryRunUser",
+                "balances": [{"available": {"amount": "1000000", "currency": "idr"}}]}
+
+    def get_balance(api_token, currency):  # noqa: F811
+        return _dr_balance.get(currency.lower(), 1_000_000.0)
+
+    def roll_dice(api_token, amount, win_chance, currency):  # noqa: F811
+        won = random.uniform(0, 100) < win_chance
+        payout = round(amount * (99.0 / win_chance), 8) if won else 0.0
+        return {
+            "id"      : str(uuid.uuid4()),
+            "amount"  : float(amount),
+            "payout"  : payout,
+            "currency": currency,
+            "state"   : {
+                "result"   : round(random.uniform(0, 100), 2),
+                "target"   : round(100.0 - win_chance, 4),
+                "condition": "above",
+            },
+        }
 
 # ═══════════════════════════════════════════════
 #  LOOP UTAMA
@@ -425,10 +480,13 @@ def run_bot():
     }
 
     balance_check = 0
+    loss_streak   = 0   # sesi kalah berturut-turut
 
     # Pelacak rugi harian
     daily_loss      = 0.0
     daily_date      = str(date.today())
+
+    _rotate_log()
 
     while True:
         try:
@@ -511,7 +569,8 @@ def run_bot():
                 print_result(state["total_bets"], True, dice_result,
                              current_bet, net, balance, session_start_bal,
                              state["total_wager"],
-                             state["total_wins"], state["total_losses"])
+                             state["total_wins"], state["total_losses"],
+                             daily_loss, cfg["daily_loss_limit"])
 
                 # Naikkan bet
                 state["bet"] = current_bet * (1 + cfg["on_win_pct"] / 100)
@@ -524,16 +583,25 @@ def run_bot():
                 stats["profit"]       -= amount
                 stats["loss_amount"]   = amount
                 daily_loss            += amount
+                loss_streak           += 1
                 # state["total_wager"] sudah mencakup losing bet (ditambah line di atas)
                 cum["total_wager"]    += state["total_wager"]
                 cum["total_profit"]   += state["total_profit"]
 
+                # ── HITUNG JEDA (sebelum print agar pause_sec tampil benar) ──
+                pause_sec = cfg["stop_pause_sec"]
+                if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
+                    pause_sec += cfg["loss_streak_extra_pause"]
+                elif cfg["stop_loss_session"] > 0 and amount >= cfg["stop_loss_session"]:
+                    pause_sec += cfg["stop_pause_sec"]   # double pause untuk bet besar
+
                 print_result(state["total_bets"], False, dice_result,
                              current_bet, net, balance, session_start_bal,
                              state["total_wager"],
-                             state["total_wins"], state["total_losses"])
+                             state["total_wins"], state["total_losses"],
+                             daily_loss, cfg["daily_loss_limit"])
 
-                print_loss_stop(current_bet, amount, cfg["stop_pause_sec"])
+                print_loss_stop(current_bet, amount, pause_sec)
                 print_stats(stats)
                 _print_cumulative(cum, balance)
 
@@ -542,13 +610,27 @@ def run_bot():
                     log(f"Daily loss limit tercapai: Rp {daily_loss:,.0f} / Rp {cfg['daily_loss_limit']:,.0f} — bot berhenti hari ini!", "STOP")
                     sys.exit(0)
 
-                time.sleep(cfg["stop_pause_sec"])
+                # ── LOG STREAK / BIG LOSS ─────────────────
+                if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
+                    log(f"Streak kalah {loss_streak}× berturut — jeda ekstra {cfg['loss_streak_extra_pause']:.0f}s", "WARN")
+                elif cfg["stop_loss_session"] > 0 and amount >= cfg["stop_loss_session"]:
+                    log(f"Bet besar kalah Rp {amount:,.0f} — jeda tambahan {cfg['stop_pause_sec']:.0f}s", "WARN")
+
+                # ── REFRESH SALDO DARI API ────────────────
+                if not DRY_RUN:
+                    try:
+                        balance = get_balance(cfg["api_token"], cfg["currency"])
+                    except Exception as e:
+                        log(f"Gagal refresh saldo setelah kalah: {e}", "WARN")
+
+                time.sleep(pause_sec)
 
                 # Mulai sesi baru
                 cum["sessions"] += 1
                 state             = new_session_state()
                 stats             = make_stats()
                 session_start_bal = balance
+                _rotate_log()
                 log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
                 continue
 
@@ -566,6 +648,8 @@ def run_bot():
                 state             = new_session_state()
                 stats             = make_stats()
                 session_start_bal = balance
+                loss_streak       = 0   # reset karena sesi berakhir profit
+                _rotate_log()
                 log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
                 continue
 

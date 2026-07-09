@@ -1,33 +1,70 @@
 #!/usr/bin/env python3
 """
-DIKE - Simulasi Strategi Berhenti Saat Kalah
-  - Win chance : 98%
-  - Setiap MENANG : bet naik 15% (maks Rp 5.000)
-  - Saat KALAH    : sesi selesai (bot berhenti)
+DIKE - Simulasi Strategi Dice Bot
+Membaca konfigurasi dari setting.txt secara otomatis.
+
+Penggunaan:
+  python3 simulasi.py
+  python3 simulasi.py --runs 100 --balance 1000000
+  python3 simulasi.py --seed 42
+  python3 simulasi.py --seed 42 --output hasil.csv
 """
 
-import random
+import random, sys, os, csv, argparse
+
+# Import parser konfigurasi dari bot.py (tidak menjalankan bot)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bot import parse_setting, SETTING_FILE
 
 # ─────────────────────────────────────────────
-#  SETTING (sama dengan setting.txt)
+#  ARGPARSE
 # ─────────────────────────────────────────────
-CFG = {
-    "base_bet"   : 200,
-    "win_chance" : 65.00,
-    "on_win_pct" : 15.0,
-    "max_bet"    : 5000,
-    "stop_profit": 500,   # berhenti jika profit sesi >= Rp 500
-}
+def parse_args():
+    p = argparse.ArgumentParser(description="DIKE — Simulasi strategi dice bot")
+    p.add_argument("--runs",    type=int,   default=50,
+                   help="Jumlah sesi simulasi (default: 50)")
+    p.add_argument("--balance", type=float, default=500_000,
+                   help="Saldo awal virtual IDR (default: 500000)")
+    p.add_argument("--seed",    type=int,   default=None,
+                   help="Seed random untuk hasil reproducible (default: acak)")
+    p.add_argument("--output",  type=str,   default=None,
+                   help="Simpan hasil ke file CSV, contoh: hasil.csv")
+    return p.parse_args()
 
-NUM_RUNS      = 50       # jumlah sesi simulasi
-START_BALANCE = 500_000  # saldo awal virtual (Rp)
+# ─────────────────────────────────────────────
+#  BACA SETTING DARI setting.txt
+# ─────────────────────────────────────────────
+def load_sim_cfg():
+    raw = parse_setting(SETTING_FILE)
+    return {
+        "base_bet"        : float(raw.get("BASE_BET", "200")),
+        "win_chance"      : float(raw.get("DEFAULT_WIN_CHANCE", "65.00")),
+        "on_win_pct"      : float(raw.get("ON_WIN_INCREASE_PCT", "15")),
+        "max_bet"         : float(raw.get("MAX_BET_IDR", "5000")),
+        "stop_profit"     : float(raw.get("STOP_PROFIT_IDR", "0")),
+        "daily_loss_limit": float(raw.get("DAILY_LOSS_LIMIT_IDR", "0")),
+    }
+
+# ─────────────────────────────────────────────
+#  ROUNDING — identik dengan bot.py
+# ─────────────────────────────────────────────
+def round_bet(bet, max_bet, balance):
+    """Bulatkan ke kelipatan 200 (half-up), terapkan max_bet, clamp ke saldo."""
+    bet = max(int(bet / 200 + 0.5) * 200, 200)
+    if max_bet > 0 and bet > max_bet:
+        bet = max((int(max_bet) // 200) * 200, 200)
+    if bet > balance:
+        bet = (int(balance) // 200) * 200
+    return int(bet)
 
 # ─────────────────────────────────────────────
 #  SIMULASI SATU SESI
-#  Sesi berakhir saat pertama kali KALAH
 # ─────────────────────────────────────────────
-
 def run_session(cfg, start_balance):
+    """
+    Satu sesi berakhir saat pertama kali KALAH atau STOP_PROFIT tercapai.
+    Payout menggunakan formula standar Stake dice: bet × (99 / win_chance).
+    """
     bet     = float(cfg["base_bet"])
     balance = float(start_balance)
     profit  = 0.0
@@ -35,23 +72,14 @@ def run_session(cfg, start_balance):
     wins    = 0
 
     while True:
-        # Bulatkan ke kelipatan 200 (half-up), minimum 200
-        bet = max(int(bet / 200 + 0.5) * 200, 200)
-        # Terapkan max bet (floor ke kelipatan 200 ≤ max_bet)
-        if cfg["max_bet"] > 0 and bet > cfg["max_bet"]:
-            bet = max((int(cfg["max_bet"]) // 200) * 200, 200)
-        # Clamp ke saldo (floor ke kelipatan 200 ≤ balance)
-        if bet > balance:
-            bet = (int(balance) // 200) * 200
-        current_bet = int(bet)
+        current_bet = round_bet(bet, cfg["max_bet"], balance)
 
         if current_bet < 200 or balance < 200:
             return dict(wins=wins, loss_bet=0, profit=profit,
-                        wager=wager, balance=balance,
-                        bankrupt=True, stop_reason="bankrupt")
+                        wager=wager, balance=balance, stop_reason="bankrupt")
 
-        # Roll
-        won = random.uniform(0, 100) > (100.0 - cfg["win_chance"])
+        # Stake dice payout: multiplier = 99 / win_chance (house edge 1%)
+        won = random.uniform(0, 100) < cfg["win_chance"]
         wager += current_bet
 
         if won:
@@ -60,147 +88,201 @@ def run_session(cfg, start_balance):
             profit  += net
             wins    += 1
             bet      = current_bet * (1 + cfg["on_win_pct"] / 100)
-            # Cek stop profit
-            stop_p = cfg.get("stop_profit", 0)
-            if stop_p > 0 and profit >= stop_p:
+            if cfg["stop_profit"] > 0 and profit >= cfg["stop_profit"]:
                 return dict(wins=wins, loss_bet=0, profit=profit,
-                            wager=wager, balance=balance,
-                            bankrupt=False, stop_reason="profit")
+                            wager=wager, balance=balance, stop_reason="profit")
         else:
             balance -= current_bet
             profit  -= current_bet
             return dict(wins=wins, loss_bet=current_bet, profit=profit,
-                        wager=wager, balance=balance,
-                        bankrupt=False, stop_reason="loss")
+                        wager=wager, balance=balance, stop_reason="loss")
 
 # ─────────────────────────────────────────────
-#  MAIN
+#  HELPER
 # ─────────────────────────────────────────────
-
 def fmt_rp(v):
     sign = "+" if v >= 0 else ""
     return f"Rp {sign}{v:,.0f}"
 
-def main():
-    random.seed()
+def avg(lst):
+    return sum(lst) / len(lst) if lst else 0.0
 
-    # Hitung bet ke-N dari base 100 naik 15%
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
+def main():
+    args = parse_args()
+    random.seed(args.seed)
+
+    cfg           = load_sim_cfg()
+    NUM_RUNS      = args.runs
+    START_BALANCE = args.balance
+
+    # Hitung berapa kemenangan agar bet capai MAX
     bets_to_max = 0
-    b = CFG["base_bet"]
-    while b < CFG["max_bet"]:
-        b *= (1 + CFG["on_win_pct"] / 100)
+    b = cfg["base_bet"]
+    while b < cfg["max_bet"]:
+        b *= (1 + cfg["on_win_pct"] / 100)
         bets_to_max += 1
 
+    seed_str = f"seed={args.seed}" if args.seed is not None else "seed=acak"
+
     print()
-    print("=" * 68)
+    print("=" * 72)
     print("  DIKE — Simulasi: Auto-restart Berhenti Saat Kalah")
-    print("=" * 68)
-    print(f"  Win chance      : {CFG['win_chance']}%")
-    print(f"  Base bet        : Rp {CFG['base_bet']:,}")
-    print(f"  Naik tiap menang: +{CFG['on_win_pct']:.0f}%  →  "
-          f"capai Rp {CFG['max_bet']:,} setelah ±{bets_to_max} menang")
+    print("=" * 72)
+    print(f"  Konfigurasi     : {SETTING_FILE}")
+    print(f"  Win chance      : {cfg['win_chance']}%")
+    print(f"  Base bet        : Rp {cfg['base_bet']:,.0f}  (dibulatkan ke kelipatan 200)")
+    print(f"  Naik tiap menang: +{cfg['on_win_pct']:.0f}%  →  "
+          f"capai Rp {cfg['max_bet']:,.0f} setelah ±{bets_to_max} menang")
     print(f"  Saat kalah      : AUTO-RESTART")
-    print(f"  Stop profit     : Rp {CFG.get('stop_profit', 0):,}  (lalu restart)")
-    print(f"  Saldo awal      : Rp {START_BALANCE:,}")
-    print(f"  Jumlah sesi    : {NUM_RUNS}")
-    print("=" * 68)
+    if cfg["stop_profit"] > 0:
+        print(f"  Stop profit     : Rp {cfg['stop_profit']:,.0f}  (lalu restart)")
+    if cfg["daily_loss_limit"] > 0:
+        print(f"  Daily loss limit: Rp {cfg['daily_loss_limit']:,.0f}")
+    print(f"  Saldo awal      : Rp {START_BALANCE:,.0f}")
+    print(f"  Jumlah sesi     : {NUM_RUNS}  ({seed_str})")
+    print("=" * 72)
 
-    print(f"\n  {'#':>3}  {'Menang':>7}  {'Bet saat kalah':>16}  "
-          f"{'P/L sesi':>14}  {'Saldo':>13}  Ket")
-    print("  " + "-" * 65)
+    show_dl = cfg["daily_loss_limit"] > 0
+    if show_dl:
+        print(f"\n  {'#':>3}  {'Menang':>7}  {'Bet saat kalah':>16}  "
+              f"{'P/L sesi':>14}  {'Saldo':>13}  {'Daily Loss':>14}  Ket")
+        print("  " + "-" * 83)
+    else:
+        print(f"\n  {'#':>3}  {'Menang':>7}  {'Bet saat kalah':>16}  "
+              f"{'P/L sesi':>14}  {'Saldo':>13}  Ket")
+        print("  " + "-" * 68)
 
-    profits  = []
-    wins_lst = []
-    loss_bets = []
-    bankrupts = 0
-    balance  = START_BALANCE
+    profits      = []
+    wins_lst     = []
+    loss_bets    = []
+    bankrupts    = 0
+    balance      = START_BALANCE
+    daily_loss   = 0.0
+    daily_hit    = False
+    csv_rows     = []
 
     for i in range(1, NUM_RUNS + 1):
-        r = run_session(CFG, balance)
+        if daily_hit:
+            break
+
+        r = run_session(cfg, balance)
 
         profits.append(r["profit"])
         wins_lst.append(r["wins"])
-        if not r["bankrupt"] and r.get("stop_reason") == "loss":
+        if r["stop_reason"] == "loss":
             loss_bets.append(r["loss_bet"])
-
-        balance = r["balance"]
-        if r["bankrupt"]:
+            daily_loss += r["loss_bet"]
+        if r["stop_reason"] == "bankrupt":
             bankrupts += 1
 
-        stop_reason = r.get("stop_reason", "loss")
-        if r["bankrupt"]:
-            ket = "BANGKRUT"
-        elif stop_reason == "profit":
-            ket = "PROFIT ✓"
-        else:
-            ket = "LOSS"
+        balance = r["balance"]
 
-        loss_str = f"Rp {r['loss_bet']:>6,.0f}" if stop_reason == "loss" else "       -  "
+        ket_map  = {"bankrupt": "BANGKRUT", "profit": "PROFIT ✓", "loss": "LOSS"}
+        ket      = ket_map.get(r["stop_reason"], "?")
+        loss_str = f"Rp {r['loss_bet']:>6,.0f}" if r["stop_reason"] == "loss" else "       -  "
         pl_str   = fmt_rp(r["profit"])
 
-        print(f"  {i:>3}  "
-              f"{r['wins']:>7,}  "
-              f"{loss_str:>16}  "
-              f"{pl_str:>14}  "
-              f"Rp {balance:>9,.0f}  "
-              f"{ket}")
+        if show_dl:
+            dl_pct = min(daily_loss / cfg["daily_loss_limit"] * 100, 100) if cfg["daily_loss_limit"] > 0 else 0
+            dl_flag = " ⚠" if dl_pct >= 80 else ""
+            dl_str  = f"Rp {daily_loss:>8,.0f}{dl_flag}"
+            print(f"  {i:>3}  {r['wins']:>7,}  {loss_str:>16}  "
+                  f"{pl_str:>14}  Rp {balance:>9,.0f}  {dl_str:>14}  {ket}")
+        else:
+            print(f"  {i:>3}  {r['wins']:>7,}  {loss_str:>16}  "
+                  f"{pl_str:>14}  Rp {balance:>9,.0f}  {ket}")
 
-    # ── RINGKASAN ──────────────────────────────────────
-    def avg(lst): return sum(lst) / len(lst) if lst else 0
+        csv_rows.append({
+            "sesi"      : i,
+            "menang"    : r["wins"],
+            "bet_kalah" : r["loss_bet"],
+            "profit"    : round(r["profit"], 2),
+            "saldo"     : round(balance, 2),
+            "daily_loss": round(daily_loss, 2),
+            "keterangan": ket,
+        })
 
-    avg_wins    = avg(wins_lst)
-    avg_profit  = avg(profits)
-    avg_loss_bet = avg(loss_bets) if loss_bets else 0
-    profitable  = sum(1 for p in profits if p > 0)
+        if cfg["daily_loss_limit"] > 0 and daily_loss >= cfg["daily_loss_limit"]:
+            print(f"\n  ⛔  Daily loss limit Rp {cfg['daily_loss_limit']:,.0f} tercapai "
+                  f"pada sesi #{i} — simulasi dihentikan.")
+            daily_hit = True
+
+    actual = len(profits)
+    profitable = sum(1 for p in profits if p > 0)
     total_profit = sum(profits)
 
+    # ── RINGKASAN ──────────────────────────────────
     print()
-    print("=" * 68)
+    print("=" * 72)
     print("  RINGKASAN")
-    print("-" * 68)
-    print(f"  Rata-rata menang per sesi     : {avg_wins:.1f} bet")
-    print(f"  Rata-rata bet saat kalah      : Rp {avg_loss_bet:,.0f}")
-    print(f"  Rata-rata P/L per sesi        : {fmt_rp(avg_profit)}")
-    print(f"  Total P/L kumulatif ({NUM_RUNS} sesi) : {fmt_rp(total_profit)}")
+    print("-" * 72)
+    print(f"  Sesi dijalankan               : {actual}")
+    print(f"  Rata-rata menang per sesi     : {avg(wins_lst):.1f} bet")
+    if loss_bets:
+        print(f"  Rata-rata bet saat kalah      : Rp {avg(loss_bets):,.0f}")
+    print(f"  Rata-rata P/L per sesi        : {fmt_rp(avg(profits))}")
+    print(f"  Total P/L kumulatif           : {fmt_rp(total_profit)}")
     print(f"  Saldo akhir                   : Rp {balance:,.0f}")
-    print(f"  Sesi profit                   : {profitable}/{NUM_RUNS}")
-    print(f"  Sesi bangkrut                 : {bankrupts}/{NUM_RUNS}")
+    print(f"  Sesi profit / total           : {profitable}/{actual}")
+    print(f"  Sesi bangkrut                 : {bankrupts}/{actual}")
+    if cfg["daily_loss_limit"] > 0:
+        status = "LIMIT TERCAPAI" if daily_hit else "dalam limit"
+        print(f"  Total rugi harian             : Rp {daily_loss:,.0f}  ({status})")
 
-    # ── ANALISIS PERTUMBUHAN BET ────────────────────────
+    # ── PERTUMBUHAN BET ────────────────────────────
     print()
-    print("-" * 68)
-    print("  PERTUMBUHAN BET (100 → maks 5.000 naik 15%/menang)")
-    print("-" * 68)
-    b = float(CFG["base_bet"])
-    step = 0
-    milestones = [500, 1000, 2000, 3000, 5000]
+    print("-" * 72)
+    print(f"  PERTUMBUHAN BET  "
+          f"(Rp {cfg['base_bet']:,.0f} → max Rp {cfg['max_bet']:,.0f}  naik {cfg['on_win_pct']:.0f}%/menang)")
+    print("-" * 72)
+    b     = float(cfg["base_bet"])
+    step  = 0
+    milestones = [m for m in [500, 1000, 2000, 3000, 5000, 10000] if cfg["base_bet"] < m <= cfg["max_bet"]]
     m_idx = 0
-    while m_idx < len(milestones) and b < CFG["max_bet"] * 1.01:
+    while m_idx < len(milestones) and b < cfg["max_bet"] * 1.01:
         if b >= milestones[m_idx]:
-            print(f"  Menang ke-{step:>2}  →  Bet: Rp {round(b):>6,}")
+            rounded = round_bet(b, cfg["max_bet"], 999_999_999)
+            print(f"  Menang ke-{step:>2}  →  Bet: Rp {rounded:>8,}")
             m_idx += 1
-        b *= (1 + CFG["on_win_pct"] / 100)
+        b *= (1 + cfg["on_win_pct"] / 100)
         step += 1
-    print(f"  Menang ke-{bets_to_max:>2}  →  Bet: Rp {CFG['max_bet']:>6,}  (MAX — tidak naik lagi)")
+    print(f"  Menang ke-{bets_to_max:>2}  →  Bet: Rp {cfg['max_bet']:>8,.0f}  (MAX)")
 
-    # Estimasi profit jika menang terus sampai maks
-    b2 = float(CFG["base_bet"])
+    # Estimasi NET satu siklus penuh
+    b2 = float(cfg["base_bet"])
     total_win_profit = 0.0
     for _ in range(bets_to_max + 1):
-        bet_i = min(round(b2), CFG["max_bet"])
-        total_win_profit += bet_i * (99.0 / CFG["win_chance"]) - bet_i
-        b2 *= (1 + CFG["on_win_pct"] / 100)
+        bet_i = round_bet(b2, cfg["max_bet"], 999_999_999)
+        if bet_i < 200:
+            break
+        total_win_profit += bet_i * (99.0 / cfg["win_chance"]) - bet_i
+        b2 *= (1 + cfg["on_win_pct"] / 100)
+    net  = total_win_profit - cfg["max_bet"]
+    sign = "+" if net >= 0 else ""
     print()
     print(f"  Jika menang {bets_to_max} kali tanpa kalah:")
-    print(f"    Total profit dari kemenangan  : Rp {total_win_profit:,.0f}")
-    print(f"    Kerugian jika kalah di max bet: Rp {CFG['max_bet']:,}")
-    net = total_win_profit - CFG["max_bet"]
-    sign = "+" if net >= 0 else ""
+    print(f"    Profit total dari kemenangan  : Rp {total_win_profit:,.0f}")
+    print(f"    Kerugian jika kalah di max bet: Rp {cfg['max_bet']:,.0f}")
     print(f"    NET satu siklus penuh         : Rp {sign}{net:,.0f}")
 
     print()
-    print("=" * 68)
+    print("=" * 72)
     print()
+
+    # ── CSV EXPORT ──────────────────────────────────
+    if args.output and csv_rows:
+        try:
+            with open(args.output, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=csv_rows[0].keys())
+                writer.writeheader()
+                writer.writerows(csv_rows)
+            print(f"  ✓ Hasil disimpan ke: {args.output}")
+            print()
+        except Exception as e:
+            print(f"  ✗ Gagal simpan CSV: {e}")
 
 if __name__ == "__main__":
     main()
