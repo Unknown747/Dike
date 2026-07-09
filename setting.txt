@@ -1,5 +1,6 @@
 # ============================================================
 #   DIKE BOT - KONFIGURASI STAKE.COM DICE AUTO BET (IDR)
+#   Edit file ini kapan saja → bot otomatis reload tanpa restart
 # ============================================================
 
 # --- API / AUTENTIKASI ---
@@ -8,9 +9,14 @@ API_TOKEN = MASUKKAN_TOKEN_API_ANDA_DISINI
 # --- MATA UANG ---
 CURRENCY = idr
 
-# --- LOGIKA UTAMA (BASE & SPEED) ---
+# --- LOGIKA UTAMA ---
 Set Base Bet = 100
 CUSTOM_DELAY_MS = 300
+DEFAULT_WIN_CHANCE = 49.50
+
+# --- BATAS BET (0 = tidak ada batas) ---
+MAX_BET_IDR = 0
+MIN_BALANCE_IDR = 0
 
 # --- MANAJEMEN KEKALAHAN (LOSE STREAK) ---
 LOSS_STREAK_3_INCREASE_BET_PERCENT = 250.00
@@ -33,9 +39,5 @@ WIN_STREAK_6_WIN_CHANCE = 65.00
 WIN_RESET_WIN_CHANCE = true
 EVERY_9_BETS_RESET_WIN_CHANCE = true
 
-# Stop bot jika total loss sesi >= nilai ini (IDR)
 STOP_LOSS_IDR = 5000
 STOP_LOSS_PAUSE_MINUTES = 2
-
-# --- DEFAULT WIN CHANCE ---
-DEFAULT_WIN_CHANCE = 49.50
