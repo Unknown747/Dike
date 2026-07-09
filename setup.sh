@@ -89,9 +89,25 @@ setup_token() {
     fi
 }
 
-setup_systemd() {
+choose_run_mode() {
     echo ""
-    echo -e "${BOLD}[4/5] Setup Systemd Service (auto-restart)...${NC}"
+    echo -e "${BOLD}[4/5] Pilih mode jalan bot...${NC}"
+    echo ""
+    echo -e "     1) Systemd (auto-restart, jalan di background, aktif saat reboot)"
+    echo -e "     2) Manual / screen (kamu jalankan sendiri, cocok jika pakai 'screen')"
+    echo ""
+    read -rp "     Pilih mode [1/2] (default 1): " MODE_INPUT
+    echo ""
+
+    if [ "$MODE_INPUT" = "2" ]; then
+        RUN_MODE="manual"
+    else
+        RUN_MODE="systemd"
+    fi
+}
+
+setup_systemd() {
+    echo -e "${BOLD}     Setup Systemd Service (auto-restart)...${NC}"
 
     cat > "${SERVICE_FILE}" <<EOF
 [Unit]
@@ -126,18 +142,40 @@ start_bot() {
     if [ "$CURRENT_TOKEN" = "MASUKKAN_TOKEN_API_ANDA_DISINI" ] || [ -z "$CURRENT_TOKEN" ]; then
         warn "API Token belum diset. Bot tidak dijalankan."
         info "Edit token dulu: nano ${BOT_DIR}/setting.txt"
-        info "Lalu jalankan  : systemctl start ${SERVICE_NAME}"
+        if [ "$RUN_MODE" = "systemd" ]; then
+            info "Lalu jalankan  : systemctl start ${SERVICE_NAME}"
+        else
+            info "Lalu jalankan  : screen -S dike -dm python3 ${BOT_DIR}/bot.py"
+        fi
         return
     fi
 
-    systemctl restart "${SERVICE_NAME}"
-    sleep 2
-    STATUS=$(systemctl is-active "${SERVICE_NAME}")
-
-    if [ "$STATUS" = "active" ]; then
-        ok "Bot berjalan! (PID: $(systemctl show -p MainPID --value ${SERVICE_NAME}))"
+    if [ "$RUN_MODE" = "systemd" ]; then
+        systemctl restart "${SERVICE_NAME}"
+        sleep 2
+        STATUS=$(systemctl is-active "${SERVICE_NAME}")
+        if [ "$STATUS" = "active" ]; then
+            ok "Bot berjalan! (PID: $(systemctl show -p MainPID --value ${SERVICE_NAME}))"
+        else
+            err "Bot gagal start. Lihat log: journalctl -u ${SERVICE_NAME} -n 30"
+        fi
     else
-        err "Bot gagal start. Lihat log: journalctl -u ${SERVICE_NAME} -n 30"
+        if ! command -v screen &>/dev/null; then
+            warn "'screen' belum terinstall. Menginstall..."
+            apt install screen -y
+        fi
+        # Pastikan tidak ada instance lama bertabrakan
+        pkill -f "python3 ${BOT_DIR}/bot.py" 2>/dev/null
+        systemctl stop "${SERVICE_NAME}" 2>/dev/null
+        systemctl disable "${SERVICE_NAME}" 2>/dev/null
+
+        screen -S dike -dm "${PYTHON_BIN}" "${BOT_DIR}/bot.py"
+        sleep 2
+        if screen -list | grep -q "dike"; then
+            ok "Bot berjalan di dalam screen session 'dike'"
+        else
+            err "Gagal start di screen. Coba manual: screen -S dike ${PYTHON_BIN} ${BOT_DIR}/bot.py"
+        fi
     fi
 }
 
@@ -149,17 +187,33 @@ print_summary() {
     echo ""
     echo -e "  ${BOLD}Perintah berguna:${NC}"
     echo ""
-    echo -e "  ${CYAN}Lihat status bot${NC}"
-    echo -e "    systemctl status ${SERVICE_NAME}"
+
+    if [ "$RUN_MODE" = "systemd" ]; then
+        echo -e "  ${CYAN}Lihat status bot${NC}"
+        echo -e "    systemctl status ${SERVICE_NAME}"
+        echo ""
+        echo -e "  ${CYAN}Stop bot${NC}"
+        echo -e "    systemctl stop ${SERVICE_NAME}"
+        echo ""
+        echo -e "  ${CYAN}Restart bot${NC}"
+        echo -e "    systemctl restart ${SERVICE_NAME}"
+    else
+        echo -e "  ${CYAN}Lihat bot yang jalan (masuk ke screen)${NC}"
+        echo -e "    screen -r dike"
+        echo ""
+        echo -e "  ${CYAN}Keluar dari screen tanpa stop bot${NC}"
+        echo -e "    tekan  Ctrl+A  lalu  D"
+        echo ""
+        echo -e "  ${CYAN}Stop bot${NC}"
+        echo -e "    screen -S dike -X quit"
+        echo ""
+        echo -e "  ${CYAN}Jalankan ulang manual${NC}"
+        echo -e "    screen -S dike -dm ${PYTHON_BIN} ${BOT_DIR}/bot.py"
+    fi
+
     echo ""
     echo -e "  ${CYAN}Lihat log live${NC}"
     echo -e "    tail -f ${BOT_DIR}/dike.log"
-    echo ""
-    echo -e "  ${CYAN}Stop bot${NC}"
-    echo -e "    systemctl stop ${SERVICE_NAME}"
-    echo ""
-    echo -e "  ${CYAN}Restart bot${NC}"
-    echo -e "    systemctl restart ${SERVICE_NAME}"
     echo ""
     echo -e "  ${CYAN}Edit konfigurasi (hot reload, tidak perlu restart)${NC}"
     echo -e "    nano ${BOT_DIR}/setting.txt"
@@ -172,6 +226,9 @@ check_root
 check_python
 install_deps
 setup_token
-setup_systemd
+choose_run_mode
+if [ "$RUN_MODE" = "systemd" ]; then
+    setup_systemd
+fi
 start_bot
 print_summary
