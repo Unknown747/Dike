@@ -49,14 +49,18 @@ LEVEL_COLOR = {
     "SALDO":    cyan,
 }
 
+import re as _re
+_ANSI_RE = _re.compile(r"\033\[[0-9;]*m")
+
+def _strip_ansi(text):
+    return _ANSI_RE.sub("", text)
+
 def log(msg, level="INFO"):
-    ts    = datetime.now().strftime("%H:%M:%S")
+    now   = datetime.now()
     color = LEVEL_COLOR.get(level, white)
-    # Terminal: berwarna
-    tag   = f"[{ts}]"
+    tag   = f"[{now.strftime('%H:%M:%S')}]"
     print(f"{dim(tag)} {color(msg)}", flush=True)
-    # File: tanpa warna
-    plain = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{level}] {msg}"
+    plain = f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] [{level}] {msg}"
     with open(LOG_FILE, "a") as f:
         f.write(plain + "\n")
 
@@ -64,7 +68,7 @@ def raw_print(line=""):
     """Print langsung tanpa level tag — untuk header/box."""
     print(line, flush=True)
     with open(LOG_FILE, "a") as f:
-        f.write(line + "\n")
+        f.write(_strip_ansi(line) + "\n")
 
 # ═══════════════════════════════════════════════
 #  BOX DRAWING
@@ -223,9 +227,8 @@ def make_headers(api_token):
 def get_user_info(api_token):
     resp = requests.post(GRAPHQL_URL, json={"query": USER_QUERY},
                          headers=make_headers(api_token), timeout=15)
-    if not resp.ok or not resp.text.strip():
-        raise Exception(f"HTTP {resp.status_code} — respons kosong/bukan JSON: {resp.text[:300]!r}")
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:300]!r}")
     try:
         data = resp.json()
     except Exception:
@@ -255,7 +258,10 @@ def roll_dice(api_token, amount, win_chance, currency):
                          headers=make_headers(api_token), timeout=15)
     if not resp.ok:
         raise Exception(f"HTTP {resp.status_code}: {resp.text[:400]!r}")
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raise Exception(f"Respons bukan JSON (HTTP {resp.status_code}): {resp.text[:300]!r}")
     if "errors" in data:
         raise Exception(f"API Error: {data['errors']}")
     return data["data"]["diceRoll"]
@@ -535,8 +541,8 @@ def run_bot():
                 except Exception as e:
                     log(f"Gagal cek saldo: {e}", "WARN")
 
-            # ── SAFETY STOP ──────────────────────────────
-            if state["session_loss"] >= cfg["stop_loss"]:
+            # ── SAFETY STOP (dilewati saat recovery aktif) ───────
+            if not recovery_active and state["session_loss"] >= cfg["stop_loss"]:
                 total_deficit += state["session_loss"]
                 print_safety_stop(state["session_loss"], total_deficit, cfg["stop_loss_pause_min"])
                 time.sleep(cfg["stop_loss_pause_min"] * 60)
@@ -597,13 +603,14 @@ def run_bot():
                     print_recovery_progress(recovered_amount, target)
 
                     if recovered_amount >= target:
-                        recovery_active  = False
-                        total_deficit    = 0.0
-                        recovered_amount = 0.0
-                        state["bet"]         = cfg["base_bet"]
-                        state["win_chance"]  = cfg["default_win_chance"]
-                        state["loss_streak"] = 0
-                        state["win_streak"]  = 0
+                        recovery_active       = False
+                        total_deficit         = 0.0
+                        recovered_amount      = 0.0
+                        state["bet"]          = cfg["base_bet"]
+                        state["win_chance"]   = cfg["default_win_chance"]
+                        state["loss_streak"]  = 0
+                        state["win_streak"]   = 0
+                        state["session_loss"] = 0.0  # hindari safety stop langsung setelah recovery
                         print_recovery_done(cfg["base_bet"])
                 else:
                     if cfg["win_reset_win_chance"]:

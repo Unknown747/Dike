@@ -10,8 +10,8 @@ WorkingDirectory=/root/dike
 ExecStart=/usr/bin/python3 /root/dike/bot.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/root/dike/dike.log
-StandardError=append:/root/dike/dike.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
