@@ -14,7 +14,7 @@ CURRENCY = idr
 # ============================================================
 
 Set Base Bet         = 100
-DEFAULT_WIN_CHANCE   = 98.00
+DEFAULT_WIN_CHANCE   = 65.00
 CUSTOM_DELAY_MS      = 300
 
 # Bet tidak akan melebihi angka ini.

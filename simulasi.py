@@ -13,7 +13,7 @@ import random
 # ─────────────────────────────────────────────
 CFG = {
     "base_bet"   : 100,
-    "win_chance" : 98.00,
+    "win_chance" : 65.00,
     "on_win_pct" : 15.0,
     "max_bet"    : 5000,
 }
