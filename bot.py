@@ -389,47 +389,39 @@ def print_startup_banner(cfg, user, balance):
 #  TAMPILAN SETIAP BET
 # ═══════════════════════════════════════════════
 
-def _streak_bar(count, char, color_fn, max_show=8):
-    filled = min(count, max_show)
-    bar    = char * filled + "·" * (max_show - filled)
-    suffix = f"+{count - max_show}" if count > max_show else ""
-    return color_fn(bar) + dim(suffix)
-
 def print_bet_line(n, mode, bet, chance, ls, ws):
-    mode_tag = magenta("[RECOVERY]") if mode else dim("[NORMAL]  ")
-    lbar = _streak_bar(ls, "▼", red)
-    wbar = _streak_bar(ws, "▲", green)
+    mode_tag = magenta("RECOVERY") if mode else dim("NORMAL  ")
+    streak   = ""
+    if ls > 0: streak += red(f"  K:{ls}")
+    if ws > 0: streak += green(f"  M:{ws}")
     raw_print(
-        f"  {mode_tag} "
-        f"{dim(f'#{n:<6}')}"
-        f"  {bold(white(f'Rp {bet:,}'))}"
-        f"  {cyan(f'{chance}%')}"
-        f"  K:{lbar}"
-        f"  M:{wbar}"
+        f"  {dim('┌')} {dim(f'#{n:<5}')} {mode_tag}"
+        f"  {bold(white(f'Rp {bet:,}'))} {dim('@')} {cyan(f'{chance}%')}"
+        f"{streak}"
     )
 
-def print_win(roll, payout, profit, total_profit, tw, tl):
+def print_win(roll, profit, total_profit, total_wager, tw, tl):
     sign = "+" if total_profit >= 0 else ""
     pcol = green if total_profit >= 0 else yellow
     raw_print(
-        f"  {green('  ✦ MENANG')}"
-        f"  roll={bold(white(f'{roll:.2f}'))}"
-        f"  payout={green(f'Rp {payout:,.0f}')}"
-        f"  profit={green(f'+Rp {profit:,.0f}')}"
-        f"  │  P/L={pcol(f'Rp {sign}{total_profit:,.0f}')}"
-        f"  {dim(f'[M:{tw} K:{tl}]')}"
+        f"  {dim('└')} {green('✦ MENANG')}  "
+        f"{bold(white(f'{roll:.2f}'))}  "
+        f"{green(f'+Rp {profit:>9,.0f}')}  {dim('│')}  "
+        f"P/L {pcol(f'Rp {sign}{total_profit:,.0f}')}  {dim('│')}  "
+        f"Wager {cyan(f'Rp {total_wager:,.0f}')}  "
+        f"{dim(f'[M:{tw} K:{tl}]')}"
     )
 
-def print_loss(roll, amount, session_loss, total_profit, tw, tl):
+def print_loss(roll, amount, total_profit, total_wager, tw, tl):
     sign = "+" if total_profit >= 0 else ""
     pcol = green if total_profit >= 0 else red
     raw_print(
-        f"  {red('  ✗ KALAH ')}"
-        f"  roll={bold(white(f'{roll:.2f}'))}"
-        f"  loss={red(f'-Rp {amount:,.0f}')}"
-        f"  sesi={yellow(f'Rp {session_loss:,.0f}')}"
-        f"  │  P/L={pcol(f'Rp {sign}{total_profit:,.0f}')}"
-        f"  {dim(f'[M:{tw} K:{tl}]')}"
+        f"  {dim('└')} {red('✗ KALAH ')}  "
+        f"{bold(white(f'{roll:.2f}'))}  "
+        f"{red(f'-Rp {amount:>9,.0f}')}  {dim('│')}  "
+        f"P/L {pcol(f'Rp {sign}{total_profit:,.0f}')}  {dim('│')}  "
+        f"Wager {cyan(f'Rp {total_wager:,.0f}')}  "
+        f"{dim(f'[M:{tw} K:{tl}]')}"
     )
 
 def print_recovery_progress(recovered, target):
@@ -437,44 +429,54 @@ def print_recovery_progress(recovered, target):
     bars = int(pct / 5)
     bar  = magenta("█" * bars) + dim("░" * (20 - bars))
     raw_print(
-        f"  {magenta('  ⟳ RECOVERY')}"
-        f"  [{bar}] {magenta(f'{pct:.1f}%')}"
-        f"  Rp {recovered:,.0f} / Rp {target:,.0f}"
+        f"  {dim('  ')} {magenta('⟳ RECOVERY')}  "
+        f"[{bar}] {magenta(f'{pct:.1f}%')}  "
+        f"Rp {recovered:,.0f} / Rp {target:,.0f}"
     )
 
 def print_safety_stop(session_loss, deficit, pause_min):
     raw_print()
-    raw_print(yellow("  ╔" + "═" * 50 + "╗"))
-    raw_print(yellow(f"  ║  ⛔  SAFETY STOP") + " " * 31 + yellow("║"))
-    raw_print(yellow(f"  ║  Loss sesi : Rp {session_loss:,.0f}") +
-              " " * max(0, 33 - len(f"Rp {session_loss:,.0f}")) + yellow("║"))
-    raw_print(yellow(f"  ║  Total def : Rp {deficit:,.0f}") +
-              " " * max(0, 33 - len(f"Rp {deficit:,.0f}")) + yellow("║"))
-    raw_print(yellow(f"  ║  Pause     : {pause_min:.0f} menit") +
-              " " * max(0, 36 - len(f"{pause_min:.0f} menit")) + yellow("║"))
-    raw_print(yellow("  ╚" + "═" * 50 + "╝"))
+    raw_print(yellow(f"  ┌{'─'*46}┐"))
+    raw_print(yellow(f"  │  ⛔  SAFETY STOP") + " " * 29 + yellow("│"))
+    raw_print(yellow(f"  │  Loss sesi  : Rp {session_loss:>12,.0f}") +
+              " " * max(0, 17 - len(f"{session_loss:,.0f}")) + yellow("│"))
+    raw_print(yellow(f"  │  Total def  : Rp {deficit:>12,.0f}") +
+              " " * max(0, 17 - len(f"{deficit:,.0f}")) + yellow("│"))
+    raw_print(yellow(f"  │  Pause      : {pause_min:.0f} menit") +
+              " " * max(0, 31 - len(f"{pause_min:.0f} menit")) + yellow("│"))
+    raw_print(yellow(f"  └{'─'*46}┘"))
     raw_print()
 
 def print_recovery_start(bet, chance, target):
-    raw_print(magenta(f"  ✦ RECOVERY MODE AKTIF"))
-    raw_print(magenta(f"    Bet: Rp {bet:,}  |  Chance: {chance}%  |  Target pulih: Rp {target:,.0f}"))
-
-def print_target_reached(total_wager, target):
     raw_print()
-    raw_print(green("  ╔══════════════════════════════════════════════╗"))
-    raw_print(green("  ║  🎯  TARGET WAGER TERCAPAI!                  ║"))
-    raw_print(green(f"  ║  Wager   : Rp {total_wager:>10,.0f}                  ║"))
-    raw_print(green(f"  ║  Target  : Rp {target:>10,.0f}                  ║"))
-    raw_print(green("  ║  Bot dihentikan otomatis.                    ║"))
-    raw_print(green("  ╚══════════════════════════════════════════════╝"))
+    raw_print(magenta(f"  ┌{'─'*46}┐"))
+    raw_print(magenta(f"  │  ✦ RECOVERY MODE AKTIF") + " " * 23 + magenta("│"))
+    raw_print(magenta(f"  │  Bet : Rp {bet:,}  ·  Chance : {chance}%") +
+              " " * max(0, 46 - len(f"  Bet : Rp {bet:,}  ·  Chance : {chance}%") - 1) + magenta("│"))
+    raw_print(magenta(f"  │  Target pulih : Rp {target:,.0f}") +
+              " " * max(0, 46 - len(f"  Target pulih : Rp {target:,.0f}") - 1) + magenta("│"))
+    raw_print(magenta(f"  └{'─'*46}┘"))
     raw_print()
 
 def print_recovery_done(base_bet):
     raw_print()
-    raw_print(green("  ╔══════════════════════════════════════╗"))
-    raw_print(green("  ║  ✓  RECOVERY SELESAI!               ║"))
-    raw_print(green(f"  ║  Kembali normal  Bet: Rp {base_bet:<10,}  ║"))
-    raw_print(green("  ╚══════════════════════════════════════╝"))
+    raw_print(green(f"  ┌{'─'*46}┐"))
+    raw_print(green(f"  │  ✓  RECOVERY SELESAI") + " " * 24 + green("│"))
+    raw_print(green(f"  │  Kembali normal  ·  Bet: Rp {base_bet:,}") +
+              " " * max(0, 46 - len(f"  Kembali normal  ·  Bet: Rp {base_bet:,}") - 1) + green("│"))
+    raw_print(green(f"  └{'─'*46}┘"))
+    raw_print()
+
+def print_target_reached(total_wager, target):
+    raw_print()
+    raw_print(green(f"  ┌{'─'*46}┐"))
+    raw_print(green(f"  │  🎯  TARGET WAGER TERCAPAI!") + " " * 18 + green("│"))
+    raw_print(green(f"  │  Wager  : Rp {total_wager:>14,.0f}") +
+              " " * max(0, 17 - len(f"{total_wager:,.0f}")) + green("│"))
+    raw_print(green(f"  │  Target : Rp {target:>14,.0f}") +
+              " " * max(0, 17 - len(f"{target:,.0f}")) + green("│"))
+    raw_print(green(f"  │  Bot dihentikan otomatis.") + " " * 20 + green("│"))
+    raw_print(green(f"  └{'─'*46}┘"))
     raw_print()
 
 # ═══════════════════════════════════════════════
@@ -605,8 +607,9 @@ def run_bot():
                 daily["profit"]       += profit
                 daily["biggest_win"]   = max(daily["biggest_win"], profit)
 
-                print_win(dice_result, payout, profit,
-                          state["total_profit"], state["total_wins"], state["total_losses"])
+                print_win(dice_result, profit,
+                          state["total_profit"], state["total_wager"],
+                          state["total_wins"], state["total_losses"])
 
                 if recovery_active:
                     recovered_amount         += profit
@@ -644,8 +647,9 @@ def run_bot():
                     daily["recovery_bets"]   += 1
                     daily["recovery_profit"] -= amount
 
-                print_loss(dice_result, amount, state["session_loss"],
-                           state["total_profit"], state["total_wins"], state["total_losses"])
+                print_loss(dice_result, amount,
+                           state["total_profit"], state["total_wager"],
+                           state["total_wins"], state["total_losses"])
 
             # ── TARGET WAGER TERCAPAI ────────────────────
             if cfg["target_wager"] > 0 and state["total_wager"] >= cfg["target_wager"]:
