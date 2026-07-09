@@ -31,7 +31,7 @@ MIN_BALANCE_IDR      = 0
 # ============================================================
 
 ON_WIN_INCREASE_PCT  = 15
-ON_LOSS_INCREASE_PCT = 100
+ON_LOSS_INCREASE_PCT = 0
 
 # ============================================================
 #   BERHENTI SAAT PROFIT TERCAPAI
