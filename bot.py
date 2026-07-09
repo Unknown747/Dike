@@ -92,23 +92,25 @@ def box_sep():
     raw_print(dim(cyan(f"║{'─'*W}║")))
 
 def box_row(label, value, color_fn=white, width=W):
-    inner = f"  {label:<22}{value}"
-    pad   = width - len(inner)
+    inner   = f"  {label:<22}{value}"
+    visible = len(_strip_ansi(inner))          # panjang visual, tanpa ANSI
+    pad     = width - visible
     raw_print(bold(cyan("║")) + color_fn(inner) + " " * max(pad, 1) + bold(cyan("║")))
 
 def box_bottom():
     raw_print(bold(cyan(f"╚{'═'*W}╝")))
 
 def box_line(text="", color_fn=white):
-    inner = f"  {text}"
-    pad   = W - len(inner)
+    inner   = f"  {text}"
+    visible = len(_strip_ansi(inner))
+    pad     = W - visible
     raw_print(bold(cyan("║")) + color_fn(inner) + " " * max(pad, 1) + bold(cyan("║")))
 
 # ═══════════════════════════════════════════════
 #  BACA KONFIGURASI (HOT RELOAD)
 # ═══════════════════════════════════════════════
 
-SETTING_FILE = "setting.txt"
+SETTING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "setting.txt")
 _last_mtime  = 0
 
 def parse_setting(filepath=SETTING_FILE):
