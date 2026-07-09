@@ -6,7 +6,7 @@ Strategi:
   - Setiap KALAH  : bot berhenti otomatis
 """
 
-import time, sys, uuid, os, requests
+import time, sys, uuid, os, requests, random
 from datetime import datetime, date
 
 _http = requests.Session()
@@ -132,11 +132,16 @@ def load_config():
     if not api_token:
         log("API_TOKEN belum diset di setting.txt atau env var STAKE_API_TOKEN!", "ERROR")
         sys.exit(1)
+    d_min = max(0.0, float(cfg.get("DELAY_MIN_MS", "200")))
+    d_max = max(0.0, float(cfg.get("DELAY_MAX_MS", "500")))
+    if d_min > d_max:
+        d_min, d_max = d_max, d_min
     return {
         "api_token"        : api_token,
         "currency"         : cfg.get("CURRENCY", "idr").lower(),
         "base_bet"         : float(cfg.get("BASE_BET", "100")),
-        "delay_ms"         : float(cfg.get("CUSTOM_DELAY_MS", "300")),
+        "delay_min_ms"     : d_min,
+        "delay_max_ms"     : d_max,
         "win_chance"       : float(cfg.get("DEFAULT_WIN_CHANCE", "98.00")),
         "max_bet"          : float(cfg.get("MAX_BET_IDR", "5000")),
         "min_balance"      : float(cfg.get("MIN_BALANCE_IDR", "0")),
@@ -144,6 +149,7 @@ def load_config():
         "stop_pause_sec"   : float(cfg.get("STOP_PAUSE_SECONDS", "10")),
         "stop_profit"      : float(cfg.get("STOP_PROFIT_IDR", "0")),
         "target_wager"     : float(cfg.get("TARGET_WAGER_IDR", "0")),
+        "daily_loss_limit" : float(cfg.get("DAILY_LOSS_LIMIT_IDR", "0")),
         "disable_colors"   : cfg.get("DISABLE_COLORS", "false").lower() == "true",
     }
 
@@ -308,7 +314,9 @@ def print_startup_banner(cfg, user, balance):
     box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)", red)
     if cfg["stop_profit"] > 0:
         box_row("Stop Profit", f"Rp {cfg['stop_profit']:,.0f}",            green)
-    box_row("Delay",       f"{cfg['delay_ms']:.0f} ms",                    white)
+    if cfg["daily_loss_limit"] > 0:
+        box_row("Daily Loss Limit", f"Rp {cfg['daily_loss_limit']:,.0f}",  red)
+    box_row("Cooldown",    f"{cfg['delay_min_ms']:.0f}–{cfg['delay_max_ms']:.0f} ms (acak)", white)
     if cfg["target_wager"] > 0:
         box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}",          blue)
     box_bottom()
@@ -418,12 +426,23 @@ def run_bot():
 
     balance_check = 0
 
+    # Pelacak rugi harian
+    daily_loss      = 0.0
+    daily_date      = str(date.today())
+
     while True:
         try:
             # ── HOT RELOAD ──────────────────────────────
             cfg = check_hot_reload(cfg)
             if cfg["disable_colors"]:
                 _COLOR = False
+
+            # ── RESET RUGI HARIAN JIKA HARI BARU ────────
+            today = str(date.today())
+            if today != daily_date:
+                log(f"Hari baru ({today}) — reset daily loss counter.", "INFO")
+                daily_loss = 0.0
+                daily_date = today
 
             # ── CEK SALDO SETIAP 50 BET ──────────────────
             balance_check += 1
@@ -438,8 +457,9 @@ def run_bot():
                 except Exception as e:
                     log(f"Gagal cek saldo: {e}", "WARN")
 
-            # ── HARD STOP: saldo < base bet → tidak bisa lanjut ─
-            if balance < cfg["base_bet"]:
+            # ── HARD STOP: saldo < bet minimum efektif (200) → tidak bisa lanjut ─
+            effective_min = max(cfg["base_bet"], 200)
+            if balance < effective_min:
                 log(f"Saldo Rp {balance:,.0f} < base bet Rp {cfg['base_bet']:,.0f}. Bot berhenti!", "WARN")
                 cum["total_wager"]  += state["total_wager"]
                 cum["total_profit"] += state["total_profit"]
@@ -447,15 +467,24 @@ def run_bot():
                 _print_cumulative(cum, balance)
                 sys.exit(0)
 
-            # ── PASTIKAN BET TIDAK MELEBIHI SALDO ────────
+            # ── BULATKAN KE KELIPATAN 200 TERDEKAT (half-up), MIN 200 ─
+            state["bet"] = max(int(state["bet"] / 200 + 0.5) * 200, 200)
+            # ── TERAPKAN MAX BET (floor ke kelipatan 200 ≤ max_bet) ──
+            if cfg["max_bet"] > 0 and state["bet"] > cfg["max_bet"]:
+                state["bet"] = max((int(cfg["max_bet"]) // 200) * 200, 200)
+            # ── CLAMP AKHIR: bet tidak boleh melebihi saldo ──────────
             if state["bet"] > balance:
-                log(f"Bet Rp {round(state['bet']):,} > saldo Rp {balance:,.0f} → reset ke base", "WARN")
-                state["bet"] = cfg["base_bet"]
-
-            # ── TERAPKAN MAX BET ──────────────────────────
-            if cfg["max_bet"] > 0:
-                state["bet"] = min(state["bet"], cfg["max_bet"])
-            state["bet"] = max(round(state["bet"]), 1)
+                # Floor ke kelipatan 200 ≤ balance
+                floored = (int(balance) // 200) * 200
+                if floored < 200:
+                    log(f"Saldo Rp {balance:,.0f} tidak cukup untuk bet minimum Rp 200. Bot berhenti!", "WARN")
+                    cum["total_wager"]  += state["total_wager"]
+                    cum["total_profit"] += state["total_profit"]
+                    print_stats(stats)
+                    _print_cumulative(cum, balance)
+                    sys.exit(0)
+                log(f"Bet diclamp dari Rp {state['bet']:,} → Rp {floored:,} (sesuai saldo)", "WARN")
+                state["bet"] = floored
 
             # ── BET ──────────────────────────────────────
             current_bet = int(state["bet"])
@@ -494,6 +523,7 @@ def run_bot():
                 stats["losses"]       += 1
                 stats["profit"]       -= amount
                 stats["loss_amount"]   = amount
+                daily_loss            += amount
                 # state["total_wager"] sudah mencakup losing bet (ditambah line di atas)
                 cum["total_wager"]    += state["total_wager"]
                 cum["total_profit"]   += state["total_profit"]
@@ -506,6 +536,12 @@ def run_bot():
                 print_loss_stop(current_bet, amount, cfg["stop_pause_sec"])
                 print_stats(stats)
                 _print_cumulative(cum, balance)
+
+                # ── CEK DAILY LOSS LIMIT ──────────────────
+                if cfg["daily_loss_limit"] > 0 and daily_loss >= cfg["daily_loss_limit"]:
+                    log(f"Daily loss limit tercapai: Rp {daily_loss:,.0f} / Rp {cfg['daily_loss_limit']:,.0f} — bot berhenti hari ini!", "STOP")
+                    sys.exit(0)
+
                 time.sleep(cfg["stop_pause_sec"])
 
                 # Mulai sesi baru
@@ -542,7 +578,8 @@ def run_bot():
                 _print_cumulative(cum, balance)
                 sys.exit(0)
 
-            time.sleep(cfg["delay_ms"] / 1000.0)
+            delay_sec = random.uniform(cfg["delay_min_ms"], cfg["delay_max_ms"]) / 1000.0
+            time.sleep(delay_sec)
 
         except KeyboardInterrupt:
             raw_print()
