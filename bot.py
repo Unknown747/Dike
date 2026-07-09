@@ -244,6 +244,9 @@ def get_balance(api_token, currency):
             return float(bal["available"]["amount"])
     return 0.0
 
+class RateLimitError(Exception):
+    """Stake.com 'Please slow down' / parallelCasinoBet."""
+
 def roll_dice(api_token, amount, win_chance, currency):
     target  = round(100.0 - win_chance, 4)
     payload = {
@@ -263,7 +266,12 @@ def roll_dice(api_token, amount, win_chance, currency):
     except Exception:
         raise Exception(f"Respons bukan JSON (HTTP {resp.status_code}): {resp.text[:300]!r}")
     if "errors" in data:
-        raise Exception(f"API Error: {data['errors']}")
+        errs     = data["errors"]
+        messages = "; ".join(e.get("message", str(e)) for e in errs)
+        err_type = errs[0].get("errorType", "") if errs else ""
+        if err_type == "parallelCasinoBet" or "slow down" in messages.lower():
+            raise RateLimitError(messages)
+        raise Exception(f"API Error: {messages}")
     return data["data"]["diceRoll"]
 
 # ═══════════════════════════════════════════════
@@ -511,6 +519,7 @@ def run_bot():
     daily         = make_daily_stats()
     today         = date.today()
     balance_check = 0
+    _bet_printed  = False  # cegah duplikat bet line saat retry
 
     while True:
         try:
@@ -564,14 +573,18 @@ def run_bot():
                     state["win_chance"] = cfg["default_win_chance"]
 
             # ── BET ──────────────────────────────────────
-            current_bet   = int(state["bet"])
+            current_bet    = int(state["bet"])
             current_chance = state["win_chance"]
 
-            print_bet_line(state["total_bets"] + 1, recovery_active,
-                           current_bet, current_chance,
-                           state["loss_streak"], state["win_streak"])
+            if not _bet_printed:
+                raw_print()
+                print_bet_line(state["total_bets"] + 1, recovery_active,
+                               current_bet, current_chance,
+                               state["loss_streak"], state["win_streak"])
+                _bet_printed = True
 
             result = roll_dice(cfg["api_token"], current_bet, current_chance, cfg["currency"])
+            _bet_printed = False  # reset setelah berhasil
 
             dice_result = result["state"]["result"]
             payout      = float(result["payout"])
@@ -660,16 +673,21 @@ def run_bot():
             print_daily_stats(daily)
             sys.exit(0)
 
+        except RateLimitError:
+            raw_print(f"  {yellow('  ↻ rate limit — tunggu 5 detik...')}")
+            time.sleep(5)
+
         except requests.exceptions.ConnectionError:
-            log("⚠  Koneksi terputus. Retry 10 detik...", "ERROR")
+            raw_print(f"  {yellow('  ↻ koneksi terputus — retry 10 detik...')}")
             time.sleep(10)
 
         except requests.exceptions.Timeout:
-            log("⚠  Request timeout. Retry 10 detik...", "ERROR")
+            raw_print(f"  {yellow('  ↻ timeout — retry 10 detik...')}")
             time.sleep(10)
 
         except Exception as e:
-            log(f"⚠  {e}. Retry 15 detik...", "ERROR")
+            raw_print(f"  {red(f'  ✖ error: {e} — retry 15 detik...')}")
+            log(f"Error: {e}", "ERROR")
             time.sleep(15)
 
 if __name__ == "__main__":
