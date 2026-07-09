@@ -142,6 +142,7 @@ def load_config():
         "min_balance"      : float(cfg.get("MIN_BALANCE_IDR", "0")),
         "on_win_pct"       : float(cfg.get("ON_WIN_INCREASE_PCT", "15")),
         "stop_pause_sec"   : float(cfg.get("STOP_PAUSE_SECONDS", "10")),
+        "stop_profit"      : float(cfg.get("STOP_PROFIT_IDR", "0")),
         "target_wager"     : float(cfg.get("TARGET_WAGER_IDR", "0")),
         "disable_colors"   : cfg.get("DISABLE_COLORS", "false").lower() == "true",
     }
@@ -304,7 +305,9 @@ def print_startup_banner(cfg, user, balance):
     box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",            yellow)
     box_row("Win Chance",  f"{cfg['win_chance']}%",                cyan)
     box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",   green)
-    box_row("Saat Kalah",  "Bot berhenti otomatis",                red)
+    box_row("Saat Kalah",   "Bot berhenti otomatis",               red)
+    if cfg["stop_profit"] > 0:
+        box_row("Stop Profit",  f"Rp {cfg['stop_profit']:,.0f}",   green)
     box_row("Delay",       f"{cfg['delay_ms']:.0f} ms",            white)
     if cfg["target_wager"] > 0:
         box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}", blue)
@@ -461,6 +464,13 @@ def run_bot():
                 print_stats(stats)
                 time.sleep(cfg["stop_pause_sec"])
                 log("Bot berhenti. Jalankan ulang untuk sesi baru.", "STOP")
+                sys.exit(0)
+
+            # ── STOP PROFIT TERCAPAI ─────────────────────
+            if cfg["stop_profit"] > 0 and stats["profit"] >= cfg["stop_profit"]:
+                raw_print()
+                log(f"Target profit Rp {cfg['stop_profit']:,.0f} tercapai — bot berhenti.", "STOP")
+                print_stats(stats, "STATISTIK SESI — PROFIT TARGET")
                 sys.exit(0)
 
             # ── TARGET WAGER TERCAPAI ────────────────────

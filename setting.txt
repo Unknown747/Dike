@@ -31,6 +31,13 @@ MIN_BALANCE_IDR      = 0
 ON_WIN_INCREASE_PCT  = 15
 
 # ============================================================
+#   BERHENTI SAAT PROFIT TERCAPAI
+#   Bot berhenti jika profit sesi sudah >= angka ini (0 = bebas)
+# ============================================================
+
+STOP_PROFIT_IDR      = 500
+
+# ============================================================
 #   JEDA SEBELUM BERHENTI (detik)
 # ============================================================
 
