@@ -427,8 +427,17 @@ def run_bot():
                 except Exception as e:
                     log(f"Gagal cek saldo: {e}", "WARN")
 
+            # ── HARD STOP: saldo < base bet → tidak bisa lanjut ─
+            if balance < cfg["base_bet"]:
+                log(f"Saldo Rp {balance:,.0f} < base bet Rp {cfg['base_bet']:,.0f}. Bot berhenti!", "WARN")
+                cum["total_wager"]  += state["total_wager"]
+                cum["total_profit"] += state["total_profit"]
+                print_stats(stats)
+                _print_cumulative(cum, balance)
+                sys.exit(0)
+
             # ── PASTIKAN BET TIDAK MELEBIHI SALDO ────────
-            if state["bet"] > balance and balance > 0:
+            if state["bet"] > balance:
                 log(f"Bet Rp {round(state['bet']):,} > saldo Rp {balance:,.0f} → reset ke base", "WARN")
                 state["bet"] = cfg["base_bet"]
 
@@ -473,7 +482,8 @@ def run_bot():
                 stats["losses"]       += 1
                 stats["profit"]       -= amount
                 stats["loss_amount"]   = amount
-                cum["total_wager"]    += state["total_wager"] + amount
+                # state["total_wager"] sudah mencakup losing bet (ditambah line di atas)
+                cum["total_wager"]    += state["total_wager"]
                 cum["total_profit"]   += state["total_profit"]
 
                 print_result(state["total_bets"], False, dice_result, net,

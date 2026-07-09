@@ -89,15 +89,15 @@ def main():
 
     print()
     print("=" * 68)
-    print("  DIKE — Simulasi: Berhenti Saat Kalah")
+    print("  DIKE — Simulasi: Auto-restart Berhenti Saat Kalah")
     print("=" * 68)
-    print(f"  Win chance     : {CFG['win_chance']}%")
-    print(f"  Base bet       : Rp {CFG['base_bet']:,}")
-    print(f"  Naik tiap menang: {CFG['on_win_pct']:.0f}%  →  "
+    print(f"  Win chance      : {CFG['win_chance']}%")
+    print(f"  Base bet        : Rp {CFG['base_bet']:,}")
+    print(f"  Naik tiap menang: +{CFG['on_win_pct']:.0f}%  →  "
           f"capai Rp {CFG['max_bet']:,} setelah ±{bets_to_max} menang")
-    print(f"  Saat kalah     : BERHENTI")
-    print(f"  Stop profit    : Rp {CFG.get('stop_profit', 0):,}")
-    print(f"  Saldo awal     : Rp {START_BALANCE:,}")
+    print(f"  Saat kalah      : AUTO-RESTART")
+    print(f"  Stop profit     : Rp {CFG.get('stop_profit', 0):,}  (lalu restart)")
+    print(f"  Saldo awal      : Rp {START_BALANCE:,}")
     print(f"  Jumlah sesi    : {NUM_RUNS}")
     print("=" * 68)
 
