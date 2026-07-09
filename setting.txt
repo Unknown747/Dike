@@ -13,7 +13,7 @@ CURRENCY = idr
 #   TARUHAN
 # ============================================================
 
-Set Base Bet         = 100
+Set Base Bet         = 200
 DEFAULT_WIN_CHANCE   = 65.00
 CUSTOM_DELAY_MS      = 300
 

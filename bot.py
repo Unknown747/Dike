@@ -301,16 +301,16 @@ def print_startup_banner(cfg, user, balance):
     box_line(f"User   : {user['name']}  (ID: {user['id']})", cyan)
     box_line(f"Saldo  : Rp {balance:,.2f}  [{cfg['currency'].upper()}]", green)
     box_mid()
-    box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",           white)
-    box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",            yellow)
-    box_row("Win Chance",  f"{cfg['win_chance']}%",                cyan)
-    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",   green)
-    box_row("Saat Kalah",   "Bot berhenti otomatis",               red)
+    box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",                   white)
+    box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",                    yellow)
+    box_row("Win Chance",  f"{cfg['win_chance']}%",                        cyan)
+    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",           green)
+    box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)", red)
     if cfg["stop_profit"] > 0:
-        box_row("Stop Profit",  f"Rp {cfg['stop_profit']:,.0f}",   green)
-    box_row("Delay",       f"{cfg['delay_ms']:.0f} ms",            white)
+        box_row("Stop Profit", f"Rp {cfg['stop_profit']:,.0f}",            green)
+    box_row("Delay",       f"{cfg['delay_ms']:.0f} ms",                    white)
     if cfg["target_wager"] > 0:
-        box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}", blue)
+        box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}",          blue)
     box_bottom()
     raw_print()
 
@@ -342,6 +342,14 @@ def print_loss_stop(bet, loss_amount, pause_sec):
               " " * max(0, 27 - len(f"{pause_sec:.0f} detik...")) + red("│"))
     raw_print(red(f"  └{'─'*46}┘"))
     raw_print()
+
+def _print_cumulative(cum, balance):
+    sign = "+" if cum["total_profit"] >= 0 else ""
+    pcol = green if cum["total_profit"] >= 0 else red
+    raw_print(dim(f"  ── Kumulatif {cum['sessions']} sesi ──  "
+                  f"Wager: Rp {cum['total_wager']:,.0f}  "
+                  f"P/L: ") + pcol(f"Rp {sign}{cum['total_profit']:,.0f}") +
+              dim(f"  Saldo: Rp {balance:,.0f}"))
 
 def print_target_reached(total_wager, target):
     raw_print()
@@ -377,16 +385,26 @@ def run_bot():
 
     print_startup_banner(cfg, user, balance)
 
-    state = {
-        "bet"          : cfg["base_bet"],
-        "total_bets"   : 0,
-        "total_wins"   : 0,
-        "total_losses" : 0,
-        "total_profit" : 0.0,
-        "total_wager"  : 0.0,
+    def new_session_state():
+        return {
+            "bet"          : cfg["base_bet"],
+            "total_bets"   : 0,
+            "total_wins"   : 0,
+            "total_losses" : 0,
+            "total_profit" : 0.0,
+            "total_wager"  : 0.0,
+        }
+
+    state = new_session_state()
+    stats = make_stats()
+
+    # Statistik kumulatif lintas sesi
+    cum = {
+        "sessions"    : 1,
+        "total_wager" : 0.0,
+        "total_profit": 0.0,
     }
 
-    stats         = make_stats()
     balance_check = 0
 
     while True:
@@ -449,12 +467,14 @@ def run_bot():
                 state["bet"] = current_bet * (1 + cfg["on_win_pct"] / 100)
 
             else:
-                # ── KALAH → BERHENTI ─────────────────────
+                # ── KALAH → AUTO-RESTART ──────────────────
                 state["total_profit"] -= amount
                 state["total_losses"] += 1
                 stats["losses"]       += 1
                 stats["profit"]       -= amount
                 stats["loss_amount"]   = amount
+                cum["total_wager"]    += state["total_wager"] + amount
+                cum["total_profit"]   += state["total_profit"]
 
                 print_result(state["total_bets"], False, dice_result, net,
                              balance, state["total_profit"],
@@ -462,21 +482,39 @@ def run_bot():
 
                 print_loss_stop(current_bet, amount, cfg["stop_pause_sec"])
                 print_stats(stats)
+                _print_cumulative(cum, balance)
                 time.sleep(cfg["stop_pause_sec"])
-                log("Bot berhenti. Jalankan ulang untuk sesi baru.", "STOP")
-                sys.exit(0)
 
-            # ── STOP PROFIT TERCAPAI ─────────────────────
+                # Mulai sesi baru
+                cum["sessions"] += 1
+                state = new_session_state()
+                stats = make_stats()
+                log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
+                continue
+
+            # ── STOP PROFIT TERCAPAI → AUTO-RESTART ──────
             if cfg["stop_profit"] > 0 and stats["profit"] >= cfg["stop_profit"]:
+                cum["total_wager"]  += state["total_wager"]
+                cum["total_profit"] += state["total_profit"]
                 raw_print()
-                log(f"Target profit Rp {cfg['stop_profit']:,.0f} tercapai — bot berhenti.", "STOP")
+                log(f"Profit Rp {cfg['stop_profit']:,.0f} tercapai — sesi #{cum['sessions']} selesai.", "STOP")
                 print_stats(stats, "STATISTIK SESI — PROFIT TARGET")
-                sys.exit(0)
+                _print_cumulative(cum, balance)
+                time.sleep(cfg["stop_pause_sec"])
 
-            # ── TARGET WAGER TERCAPAI ────────────────────
-            if cfg["target_wager"] > 0 and state["total_wager"] >= cfg["target_wager"]:
-                print_target_reached(state["total_wager"], cfg["target_wager"])
-                print_stats(stats, "STATISTIK SESI — TARGET TERCAPAI")
+                cum["sessions"] += 1
+                state = new_session_state()
+                stats = make_stats()
+                log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
+                continue
+
+            # ── TARGET WAGER TERCAPAI → BERHENTI TOTAL ───
+            if cfg["target_wager"] > 0 and cum["total_wager"] + state["total_wager"] >= cfg["target_wager"]:
+                cum["total_wager"]  += state["total_wager"]
+                cum["total_profit"] += state["total_profit"]
+                print_target_reached(cum["total_wager"], cfg["target_wager"])
+                print_stats(stats, "STATISTIK SESI TERAKHIR")
+                _print_cumulative(cum, balance)
                 sys.exit(0)
 
             time.sleep(cfg["delay_ms"] / 1000.0)

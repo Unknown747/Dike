@@ -12,7 +12,7 @@ import random
 #  SETTING (sama dengan setting.txt)
 # ─────────────────────────────────────────────
 CFG = {
-    "base_bet"   : 100,
+    "base_bet"   : 200,
     "win_chance" : 65.00,
     "on_win_pct" : 15.0,
     "max_bet"    : 5000,
