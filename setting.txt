@@ -1,6 +1,6 @@
 # ============================================================
 #   DIKE BOT - KONFIGURASI STAKE.COM DICE AUTO BET (IDR)
-#   Dioptimalkan berdasarkan hasil simulasi Monte Carlo
+#   Strategi: Simple On-Win/On-Loss (Martingale ringan)
 #   Edit file ini kapan saja → bot otomatis reload tanpa restart
 # ============================================================
 
@@ -14,78 +14,45 @@ CURRENCY = idr
 #   LOGIKA UTAMA
 # ============================================================
 
-Set Base Bet = 1000
+Set Base Bet = 100
 CUSTOM_DELAY_MS = 300
-DEFAULT_WIN_CHANCE = 49.50
+DEFAULT_WIN_CHANCE = 98.00
 
 # Batas bet (0 = tidak ada batas)
-# Disesuaikan dengan base bet baru (1000) + kenaikan saat loss streak 3/6 (x2.5-3)
-MAX_BET_IDR = 35000
+MAX_BET_IDR = 0
 
 # Bot berhenti jika saldo di bawah angka ini (0 = bebas)
-# Rekomendasi simulasi: jaga minimal 50% modal awal
-MIN_BALANCE_IDR = 50000
+MIN_BALANCE_IDR = 0
 
 # ============================================================
-#   MANAJEMEN KEKALAHAN (LOSE STREAK)
+#   STRATEGI SEDERHANA (ON WIN / ON LOSS)
+#   Aktif ketika nilai > 0. Menggantikan aturan streak kompleks.
+#   ON_WIN_INCREASE_PCT  : naikkan bet sebesar X% setiap menang
+#   ON_LOSS_INCREASE_PCT : naikkan bet sebesar X% setiap kalah
 # ============================================================
 
-LOSS_STREAK_3_INCREASE_BET_PERCENT = 250.00
-LOSS_STREAK_3_WIN_CHANCE = 92.00
-
-LOSS_STREAK_4_WIN_CHANCE = 89.00
-
-LOSS_STREAK_5_WIN_CHANCE = 94.01
-
-LOSS_STREAK_6_INCREASE_BET_PERCENT = 300.00
-LOSS_STREAK_6_WIN_CHANCE = 93.00
-
-# ============================================================
-#   MANAJEMEN KEMENANGAN (WIN STREAK)
-# ============================================================
-
-WIN_EVERY_3_RESET_BET = true
-WIN_STREAK_2_DECREASE_BET_PERCENT = 70.00
-WIN_STREAK_4_WIN_CHANCE = 70.00
-WIN_STREAK_6_WIN_CHANCE = 65.00
+ON_WIN_INCREASE_PCT  = 15
+ON_LOSS_INCREASE_PCT = 100
 
 # ============================================================
 #   RESET & SAFETY STOP
 # ============================================================
 
-WIN_RESET_WIN_CHANCE = true
-EVERY_9_BETS_RESET_WIN_CHANCE = true
-
-# Disesuaikan proporsional dengan base bet baru (1000) → tetap rasio 20x base bet
-STOP_LOSS_IDR = 20000
+STOP_LOSS_IDR = 5000
 STOP_LOSS_PAUSE_MINUTES = 2
 
 # ============================================================
-#   RECOVERY MODE (berbasis win chance, BUKAN naikkan bet)
-#   Hasil simulasi: naikkan bet saat recovery justru rugi 2x
-#   Solusi: naikkan win chance → menang lebih sering, modal aman
+#   RECOVERY MODE
 # ============================================================
 
 RECOVERY_MODE = true
-
-# Win chance saat recovery (lebih tinggi = lebih sering menang, payout kecil)
-RECOVERY_WIN_CHANCE = 90.00
-
-# Bet saat recovery SAMA dengan base bet (tidak dinaikkan)
+RECOVERY_WIN_CHANCE = 98.00
 RECOVERY_BET_MULTIPLIER = 1.0
-
-# Keluar dari recovery mode jika sudah pulih sekian persen dari deficit
 RECOVERY_EXIT_PCT = 80
-
-# Batas total deficit sebelum recovery aktif (IDR)
-# 0 = aktif setiap kali ada session loss yang belum terpulihkan
 RECOVERY_MIN_DEFICIT = 0
 
 # ============================================================
-#   TARGET WAGER (BERHENTI OTOMATIS)
-#   Bot berhenti sendiri saat total wager mencapai angka ini
-#   0 = tidak ada target, bot jalan terus
+#   TARGET WAGER (0 = tidak ada target, bot jalan terus)
 # ============================================================
 
-# Target: sisa wager ke VIP Silver (2.09% dari $50.000 @ kurs 18.101,80)
-TARGET_WAGER_IDR = 18916381
+TARGET_WAGER_IDR = 0

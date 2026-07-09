@@ -168,6 +168,9 @@ def load_config():
         "recovery_exit_pct":    float(cfg.get("RECOVERY_EXIT_PCT", "80")),
         "recovery_min_deficit": float(cfg.get("RECOVERY_MIN_DEFICIT", "0")),
         "target_wager":         float(cfg.get("TARGET_WAGER_IDR", "0")),
+        # Mode sederhana: naikkan bet setiap menang/kalah (0 = nonaktif, pakai streak rules)
+        "on_win_increase_pct":  float(cfg.get("ON_WIN_INCREASE_PCT", "0")),
+        "on_loss_increase_pct": float(cfg.get("ON_LOSS_INCREASE_PCT", "0")),
     }
 
 def check_hot_reload(cfg):
@@ -381,6 +384,13 @@ def print_startup_banner(cfg, user, balance):
     if cfg["target_wager"] > 0:
         box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}", magenta)
     box_sep()
+    _simple_mode = cfg["on_win_increase_pct"] > 0 or cfg["on_loss_increase_pct"] > 0
+    if _simple_mode:
+        box_row("Mode",          "Simple On-Win/On-Loss",                   cyan)
+        box_row("  ↳ Saat Menang", f"Bet naik {cfg['on_win_increase_pct']:.0f}%", green)
+        box_row("  ↳ Saat Kalah",  f"Bet naik {cfg['on_loss_increase_pct']:.0f}%", red)
+        if cfg["max_bet"] <= 0:
+            box_row("  ⚠ MAX BET",  "TIDAK ADA BATAS — saldo jadi penjaga", yellow)
     rec_status = green("AKTIF ✓") if cfg["recovery_mode"] else dim("nonaktif")
     box_row("Recovery Mode", rec_status if _COLOR else
             ("AKTIF" if cfg["recovery_mode"] else "nonaktif"), white)
@@ -565,6 +575,12 @@ def run_bot():
                     state["bet"]        = cfg["base_bet"]
                     state["win_chance"] = cfg["default_win_chance"]
 
+            # ── PREFLIGHT: pastikan bet tidak melebihi saldo lokal ──
+            if state["bet"] > balance and balance > 0:
+                log(f"  ⚠  Bet Rp {round(state['bet']):,} > saldo Rp {balance:,.0f} → reset ke base", "WARN")
+                state["bet"] = cfg["base_bet"]
+            state["bet"] = max(round(state["bet"]), 1)
+
             # ── BET ──────────────────────────────────────
             current_bet    = int(state["bet"])
             current_chance = state["win_chance"]
@@ -613,7 +629,12 @@ def run_bot():
                         state["session_loss"] = 0.0
                         print_recovery_done(cfg["base_bet"])
                 else:
-                    if cfg["win_reset_win_chance"]:
+                    # Mode sederhana: naikkan bet saat menang
+                    _simple = cfg["on_win_increase_pct"] > 0 or cfg["on_loss_increase_pct"] > 0
+                    if _simple and cfg["on_win_increase_pct"] > 0:
+                        state["bet"] = state["bet"] * (1 + cfg["on_win_increase_pct"] / 100)
+                        log(f"  ▲ Menang: bet naik {cfg['on_win_increase_pct']:.0f}% → Rp {round(state['bet']):,}", "RULE")
+                    elif cfg["win_reset_win_chance"]:
                         state["win_chance"] = cfg["default_win_chance"]
 
             else:
@@ -632,6 +653,12 @@ def run_bot():
                     daily["recovery_profit"] -= amount
                     target = total_deficit * cfg["recovery_exit_pct"] / 100
                     print_recovery_progress(recovered_amount, target)
+                else:
+                    # Mode sederhana: naikkan bet saat kalah
+                    _simple = cfg["on_win_increase_pct"] > 0 or cfg["on_loss_increase_pct"] > 0
+                    if _simple and cfg["on_loss_increase_pct"] > 0:
+                        state["bet"] = state["bet"] * (1 + cfg["on_loss_increase_pct"] / 100)
+                        log(f"  ▲ Kalah: bet naik {cfg['on_loss_increase_pct']:.0f}% → Rp {round(state['bet']):,}", "RULE")
 
                 print_result(state["total_bets"], recovery_active, False,
                              dice_result, net, balance,
@@ -645,15 +672,22 @@ def run_bot():
                 print_daily_stats(daily)
                 sys.exit(0)
 
-            # ── RESET SETIAP 9 BET ───────────────────────
-            if not recovery_active and cfg["every9_reset_chance"] \
-                    and state["total_bets"] % 9 == 0:
-                state["win_chance"] = cfg["default_win_chance"]
-                log(f"  ↺ Setiap 9 bet: reset chance → {cfg['default_win_chance']}%", "RULE")
-
-            # ── TERAPKAN ATURAN ──────────────────────────
+            # ── TERAPKAN ATURAN (streak) ATAU ENFORCE MAX BET (simple mode) ──
+            _simple_mode = cfg["on_win_increase_pct"] > 0 or cfg["on_loss_increase_pct"] > 0
             if not recovery_active:
-                state = apply_rules(cfg, state)
+                if _simple_mode:
+                    # Simple mode: pastikan max bet dan bulatkan
+                    if cfg["max_bet"] > 0 and state["bet"] > cfg["max_bet"]:
+                        state["bet"] = cfg["max_bet"]
+                        log(f"  ⊘ Bet dikunci pada MAX Rp {cfg['max_bet']:,.0f}", "RULE")
+                    state["bet"]        = max(round(state["bet"]), 1)
+                    state["win_chance"] = cfg["default_win_chance"]
+                else:
+                    # Streak rules + reset setiap 9 bet
+                    if cfg["every9_reset_chance"] and state["total_bets"] % 9 == 0:
+                        state["win_chance"] = cfg["default_win_chance"]
+                        log(f"  ↺ Setiap 9 bet: reset chance → {cfg['default_win_chance']}%", "RULE")
+                    state = apply_rules(cfg, state)
 
             time.sleep(cfg["delay_ms"] / 1000.0)
 
@@ -685,9 +719,20 @@ def run_bot():
                 pass
 
         except Exception as e:
-            raw_print(f"  {red(f'  ✖ error: {e} — retry 15 detik...')}")
-            log(f"Error: {e}", "ERROR")
-            time.sleep(15)
+            err_msg = str(e).lower()
+            # Saldo tidak cukup → reset bet ke base sebelum retry
+            if any(k in err_msg for k in ("insufficient", "amount", "balance", "funds")):
+                log(f"  ⚠  Saldo tidak cukup — reset bet ke Rp {cfg['base_bet']:,.0f}", "WARN")
+                state["bet"] = cfg["base_bet"]
+                try:
+                    balance = get_balance(cfg["api_token"], cfg["currency"])
+                except Exception:
+                    pass
+                time.sleep(5)
+            else:
+                raw_print(f"  {red(f'  ✖ error: {e} — retry 15 detik...')}")
+                log(f"Error: {e}", "ERROR")
+                time.sleep(15)
 
 if __name__ == "__main__":
     run_bot()
