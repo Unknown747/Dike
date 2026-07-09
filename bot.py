@@ -534,6 +534,15 @@ def run_bot():
                 except Exception as e:
                     log(f"Gagal cek saldo: {e}", "WARN")
 
+            # ── BATALKAN RECOVERY JIKA DIMATIKAN VIA HOT RELOAD ──
+            if recovery_active and not cfg["recovery_mode"]:
+                recovery_active = False
+                total_deficit   = 0.0
+                recovered_amount = 0.0
+                state["bet"]        = cfg["base_bet"]
+                state["win_chance"] = cfg["default_win_chance"]
+                log("Recovery mode dimatikan via config — kembali normal.", "RELOAD")
+
             # ── SAFETY STOP (dilewati saat recovery aktif) ───────
             if not recovery_active and state["session_loss"] >= cfg["stop_loss"]:
                 total_deficit += state["session_loss"]
@@ -621,6 +630,8 @@ def run_bot():
                     total_deficit            += amount
                     daily["recovery_bets"]   += 1
                     daily["recovery_profit"] -= amount
+                    target = total_deficit * cfg["recovery_exit_pct"] / 100
+                    print_recovery_progress(recovered_amount, target)
 
                 print_result(state["total_bets"], recovery_active, False,
                              dice_result, net, balance,
@@ -658,8 +669,8 @@ def run_bot():
 
         except requests.exceptions.ConnectionError:
             raw_print(f"  {yellow('  ↻ koneksi terputus — retry 10 detik...')}")
+            _http.close()                          # buang session stale
             time.sleep(10)
-            # Resync saldo — hasil bet saat koneksi putus bisa ambigu
             try:
                 balance = get_balance(cfg["api_token"], cfg["currency"])
             except Exception:
