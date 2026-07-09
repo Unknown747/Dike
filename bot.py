@@ -125,8 +125,11 @@ def parse_setting(filepath=SETTING_FILE):
 def load_config():
     cfg = parse_setting()
     api_token = cfg.get("API_TOKEN", "")
+    # Coba baca dari environment variable jika setting.txt belum diisi
     if not api_token or api_token == "MASUKKAN_TOKEN_API_ANDA_DISINI":
-        log("API_TOKEN belum diset di setting.txt!", "ERROR")
+        api_token = os.environ.get("STAKE_API_TOKEN", "")
+    if not api_token:
+        log("API_TOKEN belum diset di setting.txt atau STAKE_API_TOKEN env var!", "ERROR")
         sys.exit(1)
     return {
         "api_token":            api_token,
@@ -184,7 +187,7 @@ mutation DiceRoll($amount: Float!, $target: Float!, $condition: CasinoGameDiceCo
     amount
     payout
     currency
-    result {
+    state {
       ... on CasinoGameDice {
         result
         target
@@ -202,7 +205,7 @@ def make_headers(api_token):
         "Content-Type": "application/json",
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Origin": "https://stake.com",
         "Referer": "https://stake.com/",
         "User-Agent": (
@@ -220,8 +223,13 @@ def make_headers(api_token):
 def get_user_info(api_token):
     resp = requests.post(GRAPHQL_URL, json={"query": USER_QUERY},
                          headers=make_headers(api_token), timeout=15)
+    if not resp.ok or not resp.text.strip():
+        raise Exception(f"HTTP {resp.status_code} — respons kosong/bukan JSON: {resp.text[:300]!r}")
     resp.raise_for_status()
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception:
+        raise Exception(f"Respons bukan JSON (HTTP {resp.status_code}): {resp.text[:300]!r}")
     if "errors" in data:
         raise Exception(f"API Error: {data['errors']}")
     return data["data"]["user"]
@@ -245,7 +253,8 @@ def roll_dice(api_token, amount, win_chance, currency):
     }
     resp = requests.post(GRAPHQL_URL, json=payload,
                          headers=make_headers(api_token), timeout=15)
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:400]!r}")
     data = resp.json()
     if "errors" in data:
         raise Exception(f"API Error: {data['errors']}")
@@ -558,7 +567,7 @@ def run_bot():
 
             result = roll_dice(cfg["api_token"], current_bet, current_chance, cfg["currency"])
 
-            dice_result = result["result"]["result"]
+            dice_result = result["state"]["result"]
             payout      = float(result["payout"])
             amount      = float(result["amount"])
             won         = payout > 0
