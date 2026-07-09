@@ -1,0 +1,22 @@
+// --- LOGIKA UTAMA (BASE & SPEED) ---
+Set Base Bet = 100 IDR
+Set Custom Delay = 300 ms
+
+// --- MANAJEMEN KEKALAHAN (LOSE STREAK) ---
+On Every Streaks Of 3 Losses > Increase Bet Amount 250.00%  (Sudah diturunkan dari 1500%)
+On Every Streaks Of 3 Losses > Set Win Change 92.00%
+On Every Streaks Of 4 Losses > Set Win Change 89.00%
+On Every Streaks Of 5 Losses > Set Win Change 94.01%
+On Every Streaks Of 6 Losses > Increase Bet Amount 300.00%  (Sudah diturunkan dari 1600%)
+On Every Streaks Of 6 Losses > Set Win Change 93.00%
+
+// --- MANAJEMEN KEMENANGAN (WIN STREAK) ---
+On Every 3 Wins > Reset Bet Amount  
+On Every Streaks Of 2 Wins > Decrease Bet Amount 70.00%
+On Every Streaks Of 4 Wins > Set Win Change 70.00%
+On Every Streaks Of 6 Wins > Set Change 65.00%
+
+// --- RESET & SAFETY STOP ---
+On Every Win > Reset Win Change  
+On Every 9 Bets > Reset Win Change  
+On Greater Than Or Equal To 5000 IDR Loss > Stop Bot Start Again 2 Minutes
