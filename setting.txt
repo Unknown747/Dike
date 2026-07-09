@@ -80,3 +80,12 @@ RECOVERY_EXIT_PCT = 80
 # Batas total deficit sebelum recovery aktif (IDR)
 # 0 = aktif setiap kali ada session loss yang belum terpulihkan
 RECOVERY_MIN_DEFICIT = 0
+
+# ============================================================
+#   TARGET WAGER (BERHENTI OTOMATIS)
+#   Bot berhenti sendiri saat total wager mencapai angka ini
+#   0 = tidak ada target, bot jalan terus
+# ============================================================
+
+# Target: sisa wager ke VIP Silver (2.09% dari $50.000 @ kurs 18.101,80)
+TARGET_WAGER_IDR = 18916381

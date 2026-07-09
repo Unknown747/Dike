@@ -155,6 +155,7 @@ def load_config():
         "recovery_bet_mult":    float(cfg.get("RECOVERY_BET_MULTIPLIER", "1.0")),
         "recovery_exit_pct":    float(cfg.get("RECOVERY_EXIT_PCT", "80")),
         "recovery_min_deficit": float(cfg.get("RECOVERY_MIN_DEFICIT", "0")),
+        "target_wager":         float(cfg.get("TARGET_WAGER_IDR", "0")),
     }
 
 def check_hot_reload(cfg):
@@ -332,6 +333,8 @@ def print_startup_banner(cfg, user, balance):
     box_row("Delay",         f"{cfg['delay_ms']:.0f} ms",               white)
     box_row("Stop Loss",     f"Rp {cfg['stop_loss']:,.0f}  "
                              f"(pause {cfg['stop_loss_pause_min']:.0f} mnt)", red)
+    if cfg["target_wager"] > 0:
+        box_row("Target Wager", f"Rp {cfg['target_wager']:,.0f}", magenta)
     box_sep()
     rec_status = green("AKTIF ✓") if cfg["recovery_mode"] else dim("nonaktif")
     box_row("Recovery Mode", rec_status if _COLOR else
@@ -416,6 +419,16 @@ def print_recovery_start(bet, chance, target):
     raw_print(magenta(f"  ✦ RECOVERY MODE AKTIF"))
     raw_print(magenta(f"    Bet: Rp {bet:,}  |  Chance: {chance}%  |  Target pulih: Rp {target:,.0f}"))
 
+def print_target_reached(total_wager, target):
+    raw_print()
+    raw_print(green("  ╔══════════════════════════════════════════════╗"))
+    raw_print(green("  ║  🎯  TARGET WAGER TERCAPAI!                  ║"))
+    raw_print(green(f"  ║  Wager   : Rp {total_wager:>10,.0f}                  ║"))
+    raw_print(green(f"  ║  Target  : Rp {target:>10,.0f}                  ║"))
+    raw_print(green("  ║  Bot dihentikan otomatis.                    ║"))
+    raw_print(green("  ╚══════════════════════════════════════════════╝"))
+    raw_print()
+
 def print_recovery_done(base_bet):
     raw_print()
     raw_print(green("  ╔══════════════════════════════════════╗"))
@@ -455,6 +468,7 @@ def run_bot():
         "total_bets":     0,
         "session_loss":   0.0,
         "total_profit":   0.0,
+        "total_wager":    0.0,
         "_last_reset_at": -1,
     }
 
@@ -533,6 +547,7 @@ def run_bot():
             won         = payout > 0
 
             state["total_bets"] += 1
+            state["total_wager"] += amount
             daily["bets"]       += 1
 
             if won:
@@ -585,6 +600,14 @@ def run_bot():
 
                 print_loss(dice_result, amount, state["session_loss"],
                            state["total_profit"], state["total_wins"], state["total_losses"])
+
+            # ── TARGET WAGER TERCAPAI ────────────────────
+            if cfg["target_wager"] > 0 and state["total_wager"] >= cfg["target_wager"]:
+                print_target_reached(state["total_wager"], cfg["target_wager"])
+                log(f"🎯 Target wager Rp {cfg['target_wager']:,.0f} tercapai "
+                    f"(total Rp {state['total_wager']:,.0f}). Bot berhenti.", "STOP")
+                print_daily_stats(daily)
+                sys.exit(0)
 
             # ── RESET SETIAP 9 BET ───────────────────────
             if not recovery_active and cfg["every9_reset_chance"] \
