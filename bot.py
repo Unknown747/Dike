@@ -7,6 +7,9 @@ Dioptimalkan dari hasil simulasi Monte Carlo
 import time, sys, uuid, os, requests
 from datetime import datetime, date
 
+# Session HTTP persisten — reuse koneksi TCP/TLS antar bet (lebih cepat)
+_http = requests.Session()
+
 # ═══════════════════════════════════════════════
 #  WARNA TERMINAL (ANSI)
 # ═══════════════════════════════════════════════
@@ -227,8 +230,8 @@ def make_headers(api_token):
     }
 
 def get_user_info(api_token):
-    resp = requests.post(GRAPHQL_URL, json={"query": USER_QUERY},
-                         headers=make_headers(api_token), timeout=15)
+    resp = _http.post(GRAPHQL_URL, json={"query": USER_QUERY},
+                      headers=make_headers(api_token), timeout=15)
     if not resp.ok:
         raise Exception(f"HTTP {resp.status_code}: {resp.text[:300]!r}")
     try:
@@ -259,8 +262,8 @@ def roll_dice(api_token, amount, win_chance, currency):
             "identifier": str(uuid.uuid4()),
         },
     }
-    resp = requests.post(GRAPHQL_URL, json=payload,
-                         headers=make_headers(api_token), timeout=15)
+    resp = _http.post(GRAPHQL_URL, json=payload,
+                      headers=make_headers(api_token), timeout=15)
     if not resp.ok:
         raise Exception(f"HTTP {resp.status_code}: {resp.text[:400]!r}")
     try:
@@ -388,43 +391,22 @@ def print_startup_banner(cfg, user, balance):
     raw_print()
 
 # ═══════════════════════════════════════════════
-#  TAMPILAN SETIAP BET
+#  TAMPILAN SETIAP BET  (1 baris per bet)
 # ═══════════════════════════════════════════════
 
-def print_bet_line(n, mode, bet, chance, ls, ws):
-    mode_tag = magenta("RECOVERY") if mode else dim("NORMAL  ")
-    streak   = ""
-    if ls > 0: streak += red(f"  K:{ls}")
-    if ws > 0: streak += green(f"  M:{ws}")
-    raw_print(
-        f"  {dim('┌')} {dim(f'#{n:<5}')} {mode_tag}"
-        f"  {bold(white(f'Rp {bet:,}'))} {dim('@')} {cyan(f'{chance}%')}"
-        f"{streak}"
-    )
-
-def print_win(roll, profit, total_profit, total_wager, tw, tl):
-    sign = "+" if total_profit >= 0 else ""
-    pcol = green if total_profit >= 0 else yellow
-    raw_print(
-        f"  {dim('└')} {green('✦ MENANG')}  "
-        f"{bold(white(f'{roll:.2f}'))}  "
-        f"{green(f'+Rp {profit:>9,.0f}')}  {dim('│')}  "
-        f"P/L {pcol(f'Rp {sign}{total_profit:,.0f}')}  {dim('│')}  "
-        f"Wager {cyan(f'Rp {total_wager:,.0f}')}  "
-        f"{dim(f'[M:{tw} K:{tl}]')}"
-    )
-
-def print_loss(roll, amount, total_profit, total_wager, tw, tl):
-    sign = "+" if total_profit >= 0 else ""
-    pcol = green if total_profit >= 0 else red
-    raw_print(
-        f"  {dim('└')} {red('✗ KALAH ')}  "
-        f"{bold(white(f'{roll:.2f}'))}  "
-        f"{red(f'-Rp {amount:>9,.0f}')}  {dim('│')}  "
-        f"P/L {pcol(f'Rp {sign}{total_profit:,.0f}')}  {dim('│')}  "
-        f"Wager {cyan(f'Rp {total_wager:,.0f}')}  "
-        f"{dim(f'[M:{tw} K:{tl}]')}"
-    )
+def print_result(n, recovery, won, roll, net, balance, total_profit, tw, tl):
+    """Satu baris ringkas per bet: nomor · hasil · roll · profit · saldo · P/L · skor."""
+    num   = dim(f"#{n:<5}")
+    mode  = magenta("⟳ ") if recovery else "  "
+    icon  = green("✦") if won else red("✗")
+    roll_ = white(f"{roll:.2f}")
+    net_s = green(f"+Rp {net:>9,.0f}") if won else red(f"-Rp {abs(net):>9,.0f}")
+    bal_s = cyan(f"Rp {balance:>13,.0f}")
+    sign  = "+" if total_profit >= 0 else ""
+    pcol  = green if total_profit >= 0 else red
+    pl_s  = pcol(f"P/L {sign}Rp {total_profit:,.0f}")
+    score = dim(f"[M:{tw} K:{tl}]")
+    raw_print(f"  {num}{mode}{icon}  {roll_}  {net_s}  {bal_s}  {pl_s}  {score}")
 
 def print_recovery_progress(recovered, target):
     pct  = min(recovered / target * 100, 100) if target > 0 else 0
@@ -523,7 +505,6 @@ def run_bot():
     daily         = make_daily_stats()
     today         = date.today()
     balance_check = 0
-    _bet_printed  = False  # cegah duplikat bet line saat retry
 
     while True:
         try:
@@ -537,13 +518,12 @@ def run_bot():
                 today = date.today()
                 log(f"☀  Hari baru: {today}")
 
-            # ── CEK SALDO SETIAP 50 BET ──────────────────
+            # ── CEK SALDO SETIAP 50 BET (sinkronisasi) ───
             balance_check += 1
             if balance_check >= 50:
                 balance_check = 0
                 try:
                     balance = get_balance(cfg["api_token"], cfg["currency"])
-                    log(f"💰 Saldo: Rp {balance:,.2f}", "SALDO")
                     if cfg["min_balance"] > 0 and balance < cfg["min_balance"]:
                         log(f"⛔ Saldo Rp {balance:,.0f} < batas Rp {cfg['min_balance']:,.0f}. Bot berhenti!", "WARN")
                         print_daily_stats(daily)
@@ -580,43 +560,36 @@ def run_bot():
             current_bet    = int(state["bet"])
             current_chance = state["win_chance"]
 
-            if not _bet_printed:
-                raw_print()
-                print_bet_line(state["total_bets"] + 1, recovery_active,
-                               current_bet, current_chance,
-                               state["loss_streak"], state["win_streak"])
-                _bet_printed = True
-
             result = roll_dice(cfg["api_token"], current_bet, current_chance, cfg["currency"])
-            _bet_printed = False  # reset setelah berhasil
 
             dice_result = result["state"]["result"]
             payout      = float(result["payout"])
             amount      = float(result["amount"])
             won         = payout > 0
+            net         = payout - amount   # +profit atau -loss
 
-            state["total_bets"] += 1
-            state["total_wager"] += amount
-            daily["bets"]       += 1
+            balance    += net
+            state["total_bets"]   += 1
+            state["total_wager"]  += amount
+            daily["bets"]         += 1
 
             if won:
-                profit = payout - amount
-                state["total_profit"] += profit
+                state["total_profit"] += net
                 state["total_wins"]   += 1
                 state["win_streak"]   += 1
                 state["loss_streak"]   = 0
                 daily["wins"]         += 1
-                daily["profit"]       += profit
-                daily["biggest_win"]   = max(daily["biggest_win"], profit)
+                daily["profit"]       += net
+                daily["biggest_win"]   = max(daily["biggest_win"], net)
 
-                print_win(dice_result, profit,
-                          state["total_profit"], state["total_wager"],
-                          state["total_wins"], state["total_losses"])
+                print_result(state["total_bets"], recovery_active, True,
+                             dice_result, net, balance,
+                             state["total_profit"], state["total_wins"], state["total_losses"])
 
                 if recovery_active:
-                    recovered_amount         += profit
+                    recovered_amount         += net
                     daily["recovery_bets"]   += 1
-                    daily["recovery_profit"] += profit
+                    daily["recovery_profit"] += net
                     target = total_deficit * cfg["recovery_exit_pct"] / 100
                     print_recovery_progress(recovered_amount, target)
 
@@ -628,7 +601,7 @@ def run_bot():
                         state["win_chance"]   = cfg["default_win_chance"]
                         state["loss_streak"]  = 0
                         state["win_streak"]   = 0
-                        state["session_loss"] = 0.0  # hindari safety stop langsung setelah recovery
+                        state["session_loss"] = 0.0
                         print_recovery_done(cfg["base_bet"])
                 else:
                     if cfg["win_reset_win_chance"]:
@@ -649,9 +622,9 @@ def run_bot():
                     daily["recovery_bets"]   += 1
                     daily["recovery_profit"] -= amount
 
-                print_loss(dice_result, amount,
-                           state["total_profit"], state["total_wager"],
-                           state["total_wins"], state["total_losses"])
+                print_result(state["total_bets"], recovery_active, False,
+                             dice_result, net, balance,
+                             state["total_profit"], state["total_wins"], state["total_losses"])
 
             # ── TARGET WAGER TERCAPAI ────────────────────
             if cfg["target_wager"] > 0 and state["total_wager"] >= cfg["target_wager"]:
@@ -686,10 +659,19 @@ def run_bot():
         except requests.exceptions.ConnectionError:
             raw_print(f"  {yellow('  ↻ koneksi terputus — retry 10 detik...')}")
             time.sleep(10)
+            # Resync saldo — hasil bet saat koneksi putus bisa ambigu
+            try:
+                balance = get_balance(cfg["api_token"], cfg["currency"])
+            except Exception:
+                pass
 
         except requests.exceptions.Timeout:
             raw_print(f"  {yellow('  ↻ timeout — retry 10 detik...')}")
             time.sleep(10)
+            try:
+                balance = get_balance(cfg["api_token"], cfg["currency"])
+            except Exception:
+                pass
 
         except Exception as e:
             raw_print(f"  {red(f'  ✖ error: {e} — retry 15 detik...')}")
