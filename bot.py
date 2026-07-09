@@ -200,7 +200,20 @@ USER_QUERY = """{ user { id name balances { available { amount currency } } } }"
 def make_headers(api_token):
     return {
         "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Origin": "https://stake.com",
+        "Referer": "https://stake.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
         "x-access-token": api_token,
+        "x-language": "en",
+        "apollographql-client-name": "web",
+        "apollographql-client-version": "1.0.0",
         "Connection": "keep-alive",
     }
 
