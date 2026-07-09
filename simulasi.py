@@ -29,15 +29,15 @@ OLD = {
 #  SETTING BARU (optimized dari simulasi)
 # ─────────────────────────────────────────────
 NEW = {
-    "base_bet": 100, "default_win_chance": 49.50,
+    "base_bet": 2000, "default_win_chance": 49.50,
     "ls3_increase_pct": 250.0, "ls3_win_chance": 92.00,
     "ls4_win_chance": 89.00,   "ls5_win_chance": 94.01,
     "ls6_increase_pct": 300.0, "ls6_win_chance": 93.00,
     "win_every_3_reset": True, "ws2_decrease_pct": 70.0,
     "ws4_win_chance": 70.00,   "ws6_win_chance": 65.00,
     "win_reset_win_chance": True, "every9_reset_chance": True,
-    # ★ Diperketat
-    "stop_loss": 2000, "max_bet": 3500,
+    # ★ Setting saat ini (setting.txt) — base bet dinaikkan ke 2000
+    "stop_loss": 40000, "max_bet": 70000,
     "min_balance": 50000,
     # ★ Recovery mode aktif (win chance, bukan naikkan bet)
     "recovery_mode": True,
@@ -47,7 +47,7 @@ NEW = {
 
 NUM_RUNS     = 20
 BETS_PER_RUN = 10_000
-START_BAL    = 100_000
+START_BAL    = 2_000_000
 
 # ─────────────────────────────────────────────
 #  HELPERS
@@ -166,8 +166,9 @@ def main():
     print(f"  Saldo awal: Rp {START_BAL:,}  |  {BETS_PER_RUN:,} bet/sesi  |  {NUM_RUNS} sesi")
     print()
     print(f"  {'PERUBAHAN SETTING':}")
-    print(f"  Stop Loss    : Rp 5.000  →  Rp 2.000  (lebih ketat)")
-    print(f"  Max Bet      : Tidak ada  →  Rp 3.500  (batas aman)")
+    print(f"  Base Bet     : Rp 100     →  Rp 2.000  (dinaikkan 20x)")
+    print(f"  Stop Loss    : Rp 5.000   →  Rp 40.000 (proporsional 20x base bet)")
+    print(f"  Max Bet      : Tidak ada  →  Rp 70.000 (batas aman)")
     print(f"  Min Saldo    : Tidak ada  →  Rp 50.000 (batas berhenti)")
     print(f"  Recovery Mode: NONAKTIF   →  AKTIF (win chance 90%)")
     print("─"*70)
