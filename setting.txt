@@ -14,13 +14,13 @@ CURRENCY = idr
 #   LOGIKA UTAMA
 # ============================================================
 
-Set Base Bet = 2000
+Set Base Bet = 1000
 CUSTOM_DELAY_MS = 300
 DEFAULT_WIN_CHANCE = 49.50
 
 # Batas bet (0 = tidak ada batas)
-# Disesuaikan dengan base bet baru (2000) + kenaikan saat loss streak 3/6 (x2.5-3)
-MAX_BET_IDR = 70000
+# Disesuaikan dengan base bet baru (1000) + kenaikan saat loss streak 3/6 (x2.5-3)
+MAX_BET_IDR = 35000
 
 # Bot berhenti jika saldo di bawah angka ini (0 = bebas)
 # Rekomendasi simulasi: jaga minimal 50% modal awal
@@ -56,8 +56,8 @@ WIN_STREAK_6_WIN_CHANCE = 65.00
 WIN_RESET_WIN_CHANCE = true
 EVERY_9_BETS_RESET_WIN_CHANCE = true
 
-# Disesuaikan proporsional dengan base bet baru (2000) → tetap rasio 20x base bet
-STOP_LOSS_IDR = 40000
+# Disesuaikan proporsional dengan base bet baru (1000) → tetap rasio 20x base bet
+STOP_LOSS_IDR = 20000
 STOP_LOSS_PAUSE_MINUTES = 2
 
 # ============================================================
