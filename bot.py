@@ -175,7 +175,7 @@ def check_hot_reload(cfg):
 #  STAKE.COM GRAPHQL API
 # ═══════════════════════════════════════════════
 
-GRAPHQL_URL = "https://api.stake.com/graphql"
+GRAPHQL_URL = "https://stake.com/_api/graphql"
 
 DICE_ROLL_MUTATION = """
 mutation DiceRoll($amount: Float!, $target: Float!, $condition: CasinoGameDiceConditionEnum!, $currency: CurrencyEnum!, $identifier: String!) {
@@ -198,7 +198,11 @@ mutation DiceRoll($amount: Float!, $target: Float!, $condition: CasinoGameDiceCo
 USER_QUERY = """{ user { id name balances { available { amount currency } } } }"""
 
 def make_headers(api_token):
-    return {"Content-Type": "application/json", "x-access-token": api_token}
+    return {
+        "Content-Type": "application/json",
+        "x-access-token": api_token,
+        "Connection": "keep-alive",
+    }
 
 def get_user_info(api_token):
     resp = requests.post(GRAPHQL_URL, json={"query": USER_QUERY},
