@@ -35,13 +35,17 @@ def run_session(cfg, start_balance):
     wins    = 0
 
     while True:
-        # Terapkan max bet
-        if cfg["max_bet"] > 0:
-            bet = min(bet, cfg["max_bet"])
-        bet = max(round(bet), 1)
+        # Bulatkan ke kelipatan 200 (half-up), minimum 200
+        bet = max(int(bet / 200 + 0.5) * 200, 200)
+        # Terapkan max bet (floor ke kelipatan 200 ≤ max_bet)
+        if cfg["max_bet"] > 0 and bet > cfg["max_bet"]:
+            bet = max((int(cfg["max_bet"]) // 200) * 200, 200)
+        # Clamp ke saldo (floor ke kelipatan 200 ≤ balance)
+        if bet > balance:
+            bet = (int(balance) // 200) * 200
         current_bet = int(bet)
 
-        if balance < current_bet:
+        if current_bet < 200 or balance < 200:
             return dict(wins=wins, loss_bet=0, profit=profit,
                         wager=wager, balance=balance,
                         bankrupt=True, stop_reason="bankrupt")
