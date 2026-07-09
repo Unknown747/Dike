@@ -148,6 +148,8 @@ def load_config():
         sys.exit(1)
     if not api_token:
         api_token = "dry-run"
+    if float(cfg.get("ON_LOSS_INCREASE_PCT", "0")) > 0 and float(cfg.get("MAX_BET_IDR", "0")) <= 0:
+        log("PERINGATAN: ON_LOSS_INCREASE_PCT > 0 tapi MAX_BET_IDR = 0 → martingale tidak aktif (tidak ada kondisi berhenti)!", "WARN")
     d_min = max(0.0, float(cfg.get("DELAY_MIN_MS", "200")))
     d_max = max(0.0, float(cfg.get("DELAY_MAX_MS", "500")))
     if d_min > d_max:
@@ -169,6 +171,7 @@ def load_config():
         "stop_loss_session"      : float(cfg.get("STOP_LOSS_SESSION_IDR", "0")),
         "loss_streak_threshold"  : int(float(cfg.get("LOSS_STREAK_THRESHOLD", "5"))),
         "loss_streak_extra_pause": float(cfg.get("LOSS_STREAK_EXTRA_PAUSE", "120")),
+        "on_loss_pct"            : float(cfg.get("ON_LOSS_INCREASE_PCT", "0")),
         "disable_colors"         : cfg.get("DISABLE_COLORS", "false").lower() == "true",
     }
 
@@ -333,8 +336,11 @@ def print_startup_banner(cfg, user, balance):
     box_row("Base Bet",    f"Rp {cfg['base_bet']:,.0f}",                        white)
     box_row("Max Bet",     f"Rp {cfg['max_bet']:,.0f}",                         yellow)
     box_row("Win Chance",  f"{cfg['win_chance']}%",                             cyan)
-    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",                green)
-    box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)",      red)
+    box_row("Saat Menang", f"Bet naik {cfg['on_win_pct']:.0f}%",                          green)
+    if cfg["on_loss_pct"] > 0:
+        box_row("Saat Kalah",  f"Naik {cfg['on_loss_pct']:.0f}% → berhenti di max bet",  red)
+    else:
+        box_row("Saat Kalah",  f"Auto-restart ({cfg['stop_pause_sec']:.0f}s)",            red)
     if cfg["stop_profit"] > 0:
         box_row("Stop Profit",    f"Rp {cfg['stop_profit']:,.0f}",              green)
     if cfg["daily_loss_limit"] > 0:
@@ -374,13 +380,13 @@ def print_result(n, won, roll, bet, net, balance, start_bal, total_wager, tw, tl
     else:
         raw_print(f"  {num} {icon}  {roll_}  {bet_s}  {wag_s}  {bal_s} {diff_s}  {score}")
 
-def print_loss_stop(bet, loss_amount, pause_sec):
+def print_loss_stop(bet, loss_amount, pause_sec, title="KALAH — Bot berhenti"):
     raw_print()
     raw_print(red(f"  ┌{'─'*46}┐"))
-    raw_print(red(f"  │  ⛔  KALAH — Bot berhenti") + " " * 20 + red("│"))
+    raw_print(red(f"  │  ⛔  {title}") + " " * max(0, 40 - len(title)) + red("│"))
     raw_print(red(f"  │  Bet saat kalah : Rp {bet:>10,.0f}") +
               " " * max(0, 12 - len(f"{bet:,.0f}")) + red("│"))
-    raw_print(red(f"  │  Kerugian       : Rp {loss_amount:>10,.0f}") +
+    raw_print(red(f"  │  Rugi sesi      : Rp {loss_amount:>10,.0f}") +
               " " * max(0, 12 - len(f"{loss_amount:,.0f}")) + red("│"))
     raw_print(red(f"  │  Berhenti dalam {pause_sec:.0f} detik...") +
               " " * max(0, 27 - len(f"{pause_sec:.0f} detik...")) + red("│"))
@@ -504,7 +510,7 @@ def run_bot():
 
             # ── CEK SALDO SETIAP 50 BET ──────────────────
             balance_check += 1
-            if balance_check >= 50:
+            if balance_check >= 50 and not DRY_RUN:
                 balance_check = 0
                 try:
                     balance = get_balance(cfg["api_token"], cfg["currency"])
@@ -576,24 +582,13 @@ def run_bot():
                 state["bet"] = current_bet * (1 + cfg["on_win_pct"] / 100)
 
             else:
-                # ── KALAH → AUTO-RESTART ──────────────────
+                # ── KALAH ─────────────────────────────────
                 state["total_profit"] -= amount
                 state["total_losses"] += 1
                 stats["losses"]       += 1
                 stats["profit"]       -= amount
                 stats["loss_amount"]   = amount
                 daily_loss            += amount
-                loss_streak           += 1
-                # state["total_wager"] sudah mencakup losing bet (ditambah line di atas)
-                cum["total_wager"]    += state["total_wager"]
-                cum["total_profit"]   += state["total_profit"]
-
-                # ── HITUNG JEDA (sebelum print agar pause_sec tampil benar) ──
-                pause_sec = cfg["stop_pause_sec"]
-                if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
-                    pause_sec += cfg["loss_streak_extra_pause"]
-                elif cfg["stop_loss_session"] > 0 and amount >= cfg["stop_loss_session"]:
-                    pause_sec += cfg["stop_pause_sec"]   # double pause untuk bet besar
 
                 print_result(state["total_bets"], False, dice_result,
                              current_bet, net, balance, session_start_bal,
@@ -601,38 +596,89 @@ def run_bot():
                              state["total_wins"], state["total_losses"],
                              daily_loss, cfg["daily_loss_limit"])
 
-                print_loss_stop(current_bet, amount, pause_sec)
-                print_stats(stats)
-                _print_cumulative(cum, balance)
-
                 # ── CEK DAILY LOSS LIMIT ──────────────────
                 if cfg["daily_loss_limit"] > 0 and daily_loss >= cfg["daily_loss_limit"]:
-                    log(f"Daily loss limit tercapai: Rp {daily_loss:,.0f} / Rp {cfg['daily_loss_limit']:,.0f} — bot berhenti hari ini!", "STOP")
+                    cum["total_wager"]  += state["total_wager"]
+                    cum["total_profit"] += state["total_profit"]
+                    print_stats(stats)
+                    _print_cumulative(cum, balance)
+                    log(f"Daily loss limit Rp {daily_loss:,.0f} tercapai — bot berhenti hari ini!", "STOP")
                     sys.exit(0)
 
-                # ── LOG STREAK / BIG LOSS ─────────────────
-                if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
-                    log(f"Streak kalah {loss_streak}× berturut — jeda ekstra {cfg['loss_streak_extra_pause']:.0f}s", "WARN")
-                elif cfg["stop_loss_session"] > 0 and amount >= cfg["stop_loss_session"]:
-                    log(f"Bet besar kalah Rp {amount:,.0f} — jeda tambahan {cfg['stop_pause_sec']:.0f}s", "WARN")
+                if cfg["on_loss_pct"] > 0 and cfg["max_bet"] > 0:
+                    # ── MARTINGALE: naik bet, lanjut sesi ──
+                    new_bet = max(int(current_bet * (1 + cfg["on_loss_pct"] / 100) / 200 + 0.5) * 200, 200)
+                    if new_bet > cfg["max_bet"]:
+                        new_bet = max((int(cfg["max_bet"]) // 200) * 200, 200)
 
-                # ── REFRESH SALDO DARI API ────────────────
-                if not DRY_RUN:
-                    try:
-                        balance = get_balance(cfg["api_token"], cfg["currency"])
-                    except Exception as e:
-                        log(f"Gagal refresh saldo setelah kalah: {e}", "WARN")
+                    if new_bet >= cfg["max_bet"]:
+                        # ── BET MENYENTUH MAX → AKHIRI SESI ──
+                        loss_streak += 1
+                        cum["total_wager"]  += state["total_wager"]
+                        cum["total_profit"] += state["total_profit"]
 
-                time.sleep(pause_sec)
+                        pause_sec = cfg["stop_pause_sec"]
+                        if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
+                            pause_sec += cfg["loss_streak_extra_pause"]
+                            log(f"Streak {loss_streak}× sesi berakhir di max — jeda ekstra {cfg['loss_streak_extra_pause']:.0f}s", "WARN")
 
-                # Mulai sesi baru
-                cum["sessions"] += 1
-                state             = new_session_state()
-                stats             = make_stats()
-                session_start_bal = balance
-                _rotate_log()
-                log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
-                continue
+                        print_loss_stop(current_bet, abs(state["total_profit"]), pause_sec,
+                                        title="BET MAX TERCAPAI — Sesi berakhir")
+                        print_stats(stats)
+                        _print_cumulative(cum, balance)
+
+                        if not DRY_RUN:
+                            try:
+                                balance = get_balance(cfg["api_token"], cfg["currency"])
+                            except Exception as e:
+                                log(f"Gagal refresh saldo: {e}", "WARN")
+
+                        time.sleep(pause_sec)
+                        cum["sessions"] += 1
+                        state             = new_session_state()
+                        stats             = make_stats()
+                        session_start_bal = balance
+                        _rotate_log()
+                        log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
+                        continue
+
+                    else:
+                        # Lanjut martingale — bet naik, tidak restart
+                        state["bet"] = new_bet
+                        log(f"Kalah — martingale: Rp {current_bet:,} → Rp {new_bet:,}", "WARN")
+
+                else:
+                    # ── ORIGINAL: berhenti saat pertama kalah ─
+                    loss_streak += 1
+                    cum["total_wager"]  += state["total_wager"]
+                    cum["total_profit"] += state["total_profit"]
+
+                    pause_sec = cfg["stop_pause_sec"]
+                    if cfg["loss_streak_threshold"] > 0 and loss_streak >= cfg["loss_streak_threshold"]:
+                        pause_sec += cfg["loss_streak_extra_pause"]
+                        log(f"Streak {loss_streak}× kalah berturut — jeda ekstra {cfg['loss_streak_extra_pause']:.0f}s", "WARN")
+                    elif cfg["stop_loss_session"] > 0 and amount >= cfg["stop_loss_session"]:
+                        pause_sec += cfg["stop_pause_sec"]
+                        log(f"Bet besar kalah Rp {amount:,.0f} — jeda tambahan {cfg['stop_pause_sec']:.0f}s", "WARN")
+
+                    print_loss_stop(current_bet, amount, pause_sec)
+                    print_stats(stats)
+                    _print_cumulative(cum, balance)
+
+                    if not DRY_RUN:
+                        try:
+                            balance = get_balance(cfg["api_token"], cfg["currency"])
+                        except Exception as e:
+                            log(f"Gagal refresh saldo setelah kalah: {e}", "WARN")
+
+                    time.sleep(pause_sec)
+                    cum["sessions"] += 1
+                    state             = new_session_state()
+                    stats             = make_stats()
+                    session_start_bal = balance
+                    _rotate_log()
+                    log(f"Sesi #{cum['sessions']} dimulai.", "INFO")
+                    continue
 
             # ── STOP PROFIT TERCAPAI → AUTO-RESTART ──────
             if cfg["stop_profit"] > 0 and stats["profit"] >= cfg["stop_profit"]:

@@ -38,8 +38,9 @@ def load_sim_cfg():
     raw = parse_setting(SETTING_FILE)
     return {
         "base_bet"        : float(raw.get("BASE_BET", "200")),
-        "win_chance"      : float(raw.get("DEFAULT_WIN_CHANCE", "65.00")),
+        "win_chance"      : float(raw.get("DEFAULT_WIN_CHANCE", "98.00")),
         "on_win_pct"      : float(raw.get("ON_WIN_INCREASE_PCT", "15")),
+        "on_loss_pct"     : float(raw.get("ON_LOSS_INCREASE_PCT", "0")),
         "max_bet"         : float(raw.get("MAX_BET_IDR", "5000")),
         "stop_profit"     : float(raw.get("STOP_PROFIT_IDR", "0")),
         "daily_loss_limit": float(raw.get("DAILY_LOSS_LIMIT_IDR", "0")),
@@ -62,21 +63,29 @@ def round_bet(bet, max_bet, balance):
 # ─────────────────────────────────────────────
 def run_session(cfg, start_balance):
     """
-    Satu sesi berakhir saat pertama kali KALAH atau STOP_PROFIT tercapai.
-    Payout menggunakan formula standar Stake dice: bet × (99 / win_chance).
+    Satu sesi berakhir saat:
+    - Martingale mode (on_loss_pct > 0): bet menyentuh max_bet → sesi berakhir
+    - Normal mode (on_loss_pct = 0): pertama kali kalah → sesi berakhir
+    - Stop profit tercapai
+    - Bankrupt (saldo < 200)
+
+    Payout: bet × (99 / win_chance) — standar Stake dice (house edge 1%).
     """
-    bet     = float(cfg["base_bet"])
-    balance = float(start_balance)
-    profit  = 0.0
-    wager   = 0.0
-    wins    = 0
+    bet        = float(cfg["base_bet"])
+    balance    = float(start_balance)
+    profit     = 0.0
+    wager      = 0.0
+    wins       = 0
+    losses     = 0
+    total_lost = 0.0  # sum of all losing bet amounts this session
 
     while True:
         current_bet = round_bet(bet, cfg["max_bet"], balance)
 
         if current_bet < 200 or balance < 200:
-            return dict(wins=wins, loss_bet=0, profit=profit,
-                        wager=wager, balance=balance, stop_reason="bankrupt")
+            return dict(wins=wins, losses=losses, loss_bet=0, profit=profit,
+                        wager=wager, balance=balance, total_lost=total_lost,
+                        stop_reason="bankrupt")
 
         # Stake dice payout: multiplier = 99 / win_chance (house edge 1%)
         won = random.uniform(0, 100) < cfg["win_chance"]
@@ -89,13 +98,34 @@ def run_session(cfg, start_balance):
             wins    += 1
             bet      = current_bet * (1 + cfg["on_win_pct"] / 100)
             if cfg["stop_profit"] > 0 and profit >= cfg["stop_profit"]:
-                return dict(wins=wins, loss_bet=0, profit=profit,
-                            wager=wager, balance=balance, stop_reason="profit")
+                return dict(wins=wins, losses=losses, loss_bet=0, profit=profit,
+                            wager=wager, balance=balance, total_lost=total_lost,
+                            stop_reason="profit")
         else:
-            balance -= current_bet
-            profit  -= current_bet
-            return dict(wins=wins, loss_bet=current_bet, profit=profit,
-                        wager=wager, balance=balance, stop_reason="loss")
+            balance    -= current_bet
+            profit     -= current_bet
+            losses     += 1
+            total_lost += current_bet
+
+            if cfg["on_loss_pct"] > 0 and cfg["max_bet"] > 0:
+                # Martingale: naik bet, lanjut sesi
+                new_bet = max(int(current_bet * (1 + cfg["on_loss_pct"] / 100) / 200 + 0.5) * 200, 200)
+                if new_bet > cfg["max_bet"]:
+                    new_bet = max((int(cfg["max_bet"]) // 200) * 200, 200)
+
+                if new_bet >= cfg["max_bet"]:
+                    # Bet menyentuh max → akhiri sesi
+                    return dict(wins=wins, losses=losses, loss_bet=current_bet,
+                                profit=profit, wager=wager, balance=balance,
+                                total_lost=total_lost, stop_reason="max_bet")
+                else:
+                    bet = float(new_bet)
+                    # Lanjut sesi dengan bet yang naik
+            else:
+                # Mode normal: stop saat pertama kalah
+                return dict(wins=wins, losses=losses, loss_bet=current_bet,
+                            profit=profit, wager=wager, balance=balance,
+                            total_lost=total_lost, stop_reason="loss")
 
 # ─────────────────────────────────────────────
 #  HELPER
@@ -136,7 +166,10 @@ def main():
     print(f"  Base bet        : Rp {cfg['base_bet']:,.0f}  (dibulatkan ke kelipatan 200)")
     print(f"  Naik tiap menang: +{cfg['on_win_pct']:.0f}%  →  "
           f"capai Rp {cfg['max_bet']:,.0f} setelah ±{bets_to_max} menang")
-    print(f"  Saat kalah      : AUTO-RESTART")
+    if cfg["on_loss_pct"] > 0:
+        print(f"  Saat kalah      : Naik {cfg['on_loss_pct']:.0f}% (martingale) → berhenti di max bet Rp {cfg['max_bet']:,.0f}")
+    else:
+        print(f"  Saat kalah      : AUTO-RESTART")
     if cfg["stop_profit"] > 0:
         print(f"  Stop profit     : Rp {cfg['stop_profit']:,.0f}  (lalu restart)")
     if cfg["daily_loss_limit"] > 0:
@@ -172,17 +205,23 @@ def main():
 
         profits.append(r["profit"])
         wins_lst.append(r["wins"])
-        if r["stop_reason"] == "loss":
-            loss_bets.append(r["loss_bet"])
-            daily_loss += r["loss_bet"]
+        if r["stop_reason"] in ("loss", "max_bet", "bankrupt"):
+            if r["loss_bet"] > 0:
+                loss_bets.append(r["loss_bet"])
+            daily_loss += r.get("total_lost", r["loss_bet"])
         if r["stop_reason"] == "bankrupt":
             bankrupts += 1
 
         balance = r["balance"]
 
-        ket_map  = {"bankrupt": "BANGKRUT", "profit": "PROFIT ✓", "loss": "LOSS"}
+        ket_map  = {
+            "bankrupt": "BANGKRUT",
+            "profit"  : "PROFIT ✓",
+            "loss"    : "LOSS",
+            "max_bet" : "MAX BET ⛔",
+        }
         ket      = ket_map.get(r["stop_reason"], "?")
-        loss_str = f"Rp {r['loss_bet']:>6,.0f}" if r["stop_reason"] == "loss" else "       -  "
+        loss_str = f"Rp {r['loss_bet']:>6,.0f}" if r["stop_reason"] in ("loss", "max_bet") else "       -  "
         pl_str   = fmt_rp(r["profit"])
 
         if show_dl:

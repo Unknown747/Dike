@@ -14,7 +14,7 @@ CURRENCY = idr
 # ============================================================
 
 Set Base Bet         = 200
-DEFAULT_WIN_CHANCE   = 65.00
+DEFAULT_WIN_CHANCE   = 98.00
 # Cooldown dinamis: bot pilih delay acak antara MIN dan MAX setiap bet
 DELAY_MIN_MS         = 200
 DELAY_MAX_MS         = 500
@@ -31,13 +31,14 @@ MIN_BALANCE_IDR      = 0
 # ============================================================
 
 ON_WIN_INCREASE_PCT  = 15
+ON_LOSS_INCREASE_PCT = 100
 
 # ============================================================
 #   BERHENTI SAAT PROFIT TERCAPAI
 #   Bot berhenti jika profit sesi sudah >= angka ini (0 = bebas)
 # ============================================================
 
-STOP_PROFIT_IDR      = 500
+STOP_PROFIT_IDR      = 0
 
 # ============================================================
 #   BATAS RUGI HARIAN (0 = bebas)
