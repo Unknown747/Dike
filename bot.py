@@ -161,7 +161,8 @@ def load_config():
         "win_reset_win_chance": cfg.get("WIN_RESET_WIN_CHANCE", "true").lower() == "true",
         "every9_reset_chance":  cfg.get("EVERY_9_BETS_RESET_WIN_CHANCE", "true").lower() == "true",
         "stop_loss":            float(cfg.get("STOP_LOSS_IDR", "2000")),
-        "stop_loss_pause_min":  float(cfg.get("STOP_LOSS_PAUSE_MINUTES", "2")),
+        "stop_loss_pause_sec":  float(cfg.get("STOP_LOSS_PAUSE_SECONDS", "10")),
+        "disable_colors":       cfg.get("DISABLE_COLORS", "false").lower() == "true",
         "recovery_mode":        cfg.get("RECOVERY_MODE", "true").lower() == "true",
         "recovery_win_chance":  float(cfg.get("RECOVERY_WIN_CHANCE", "90.00")),
         "recovery_bet_mult":    float(cfg.get("RECOVERY_BET_MULTIPLIER", "1.0")),
@@ -428,16 +429,16 @@ def print_recovery_progress(recovered, target):
         f"Rp {recovered:,.0f} / Rp {target:,.0f}"
     )
 
-def print_safety_stop(session_loss, deficit, pause_min):
+def print_safety_stop(session_loss, deficit, pause_sec):
     raw_print()
     raw_print(yellow(f"  ┌{'─'*46}┐"))
-    raw_print(yellow(f"  │  ⛔  SAFETY STOP") + " " * 29 + yellow("│"))
+    raw_print(yellow(f"  │  ⛔  BERHENTI SAAT KALAH") + " " * 22 + yellow("│"))
     raw_print(yellow(f"  │  Loss sesi  : Rp {session_loss:>12,.0f}") +
               " " * max(0, 17 - len(f"{session_loss:,.0f}")) + yellow("│"))
     raw_print(yellow(f"  │  Total def  : Rp {deficit:>12,.0f}") +
               " " * max(0, 17 - len(f"{deficit:,.0f}")) + yellow("│"))
-    raw_print(yellow(f"  │  Pause      : {pause_min:.0f} menit") +
-              " " * max(0, 31 - len(f"{pause_min:.0f} menit")) + yellow("│"))
+    raw_print(yellow(f"  │  Berhenti dalam {pause_sec:.0f} detik...") +
+              " " * max(0, 27 - len(f"{pause_sec:.0f} detik...")) + yellow("│"))
     raw_print(yellow(f"  └{'─'*46}┘"))
     raw_print()
 
@@ -478,11 +479,15 @@ def print_target_reached(total_wager, target):
 # ═══════════════════════════════════════════════
 
 def run_bot():
-    global _last_mtime
+    global _last_mtime, _COLOR
     _last_mtime = 0
 
     cfg = load_config()
     _last_mtime = os.path.getmtime(SETTING_FILE)
+
+    # Terapkan pengaturan warna
+    if cfg["disable_colors"]:
+        _COLOR = False
 
     # Verifikasi akun & saldo awal
     try:
@@ -553,27 +558,14 @@ def run_bot():
                 state["win_chance"] = cfg["default_win_chance"]
                 log("Recovery mode dimatikan via config — kembali normal.", "RELOAD")
 
-            # ── SAFETY STOP (dilewati saat recovery aktif) ───────
+            # ── SAFETY STOP — berhenti total setelah jeda ────────
             if not recovery_active and state["session_loss"] >= cfg["stop_loss"]:
                 total_deficit += state["session_loss"]
-                print_safety_stop(state["session_loss"], total_deficit, cfg["stop_loss_pause_min"])
-                time.sleep(cfg["stop_loss_pause_min"] * 60)
-
-                state["session_loss"] = 0.0
-                state["loss_streak"]  = 0
-                state["win_streak"]   = 0
-
-                if cfg["recovery_mode"] and total_deficit > cfg["recovery_min_deficit"]:
-                    recovery_active  = True
-                    recovered_amount = 0.0
-                    rec_bet = max(round(cfg["base_bet"] * cfg["recovery_bet_mult"]), 1)
-                    state["bet"]        = rec_bet
-                    state["win_chance"] = cfg["recovery_win_chance"]
-                    target = total_deficit * cfg["recovery_exit_pct"] / 100
-                    print_recovery_start(rec_bet, cfg["recovery_win_chance"], target)
-                else:
-                    state["bet"]        = cfg["base_bet"]
-                    state["win_chance"] = cfg["default_win_chance"]
+                print_safety_stop(state["session_loss"], total_deficit, cfg["stop_loss_pause_sec"])
+                print_daily_stats(daily)
+                time.sleep(cfg["stop_loss_pause_sec"])
+                log("Berhenti saat kalah tercapai. Bot dihentikan.", "STOP")
+                sys.exit(0)
 
             # ── PREFLIGHT: pastikan bet tidak melebihi saldo lokal ──
             if state["bet"] > balance and balance > 0:
